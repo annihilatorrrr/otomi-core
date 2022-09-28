@@ -9,10 +9,7 @@ import urllib.request
 
 
 def iteritems(d):
-    if hasattr(dict, "iteritems"):
-        return d.iteritems()
-    else:
-        return iter(d.items())
+    return d.iteritems() if hasattr(dict, "iteritems") else iter(d.items())
 
 
 def additional_properties(data):
@@ -22,9 +19,8 @@ def additional_properties(data):
         for k, v in iteritems(data):
             new_v = v
             if isinstance(v, dict):
-                if "properties" in v:
-                    if "additionalProperties" not in v:
-                        v["additionalProperties"] = False
+                if "properties" in v and "additionalProperties" not in v:
+                    v["additionalProperties"] = False
                 new_v = additional_properties(v)
             else:
                 new_v = v
@@ -46,9 +42,7 @@ def replace_int_or_string(data):
                 else:
                     new_v = replace_int_or_string(v)
             elif isinstance(v, list):
-                new_v = list()
-                for x in v:
-                    new_v.append(replace_int_or_string(x))
+                new_v = [replace_int_or_string(x) for x in v]
             else:
                 new_v = v
             new[k] = new_v
@@ -65,9 +59,7 @@ def allow_null_optional_fields(data, parent=None, grand_parent=None, key=None):
             if isinstance(v, dict):
                 new_v = allow_null_optional_fields(v, data, parent, k)
             elif isinstance(v, list):
-                new_v = list()
-                for x in v:
-                    new_v.append(allow_null_optional_fields(x, v, parent, k))
+                new_v = [allow_null_optional_fields(x, v, parent, k) for x in v]
             elif isinstance(v, str):
                 is_non_null_type = k == "type" and v != "null"
                 has_required_fields = grand_parent and "required" in grand_parent
@@ -99,9 +91,8 @@ def write_schema_file(schema, filename):
 
     # Dealing with user input here..
     filename = os.path.basename(filename)
-    f = open(filename, "w")
-    f.write(schemaJSON)
-    f.close()
+    with open(filename, "w") as f:
+        f.write(schemaJSON)
     print("JSON schema written to {filename}".format(filename=filename))
 
 
