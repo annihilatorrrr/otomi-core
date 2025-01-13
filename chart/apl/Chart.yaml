@@ -1,0 +1,19 @@
+apiVersion: v2
+name: apl
+description: A Helm chart for installing APL in Kubernetes
+home: https://apl-docs.net/
+icon: https://apl-docs.net/img/otomi-logo.svg
+type: application
+version: 0.0.0-chart-version
+appVersion: APP_VERSION_PLACEHOLDER
+keywords:
+  - linode
+  - lke
+  - multi-tenancy
+  - continuous-delivery
+  - continuous-integration
+  - continuous-integration
+  - observability
+  - security
+sources:
+  - https://github.com/linode/apl-core

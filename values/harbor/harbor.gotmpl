@@ -1,129 +1,55 @@
 {{- $v := .Values }}
 {{- $h := $v.apps.harbor }}
-{{- $hp := $h | get "persistence" dict }}
+{{- $db := $v.databases.harbor }}
+{{- $obj := $v.obj.provider }}
 {{- $harborDomain := printf "harbor.%s" $v.cluster.domainSuffix }}
 {{- $notaryDomain := printf "notary.%s" $v.cluster.domainSuffix }}
 {{- $harborSecretName := ($harborDomain | replace "." "-") }}
 {{- $notarySecretName := ($notaryDomain | replace "." "-") }}
 {{- $externalUrl := printf "https://%s" $harborDomain }}
-{{- $tag := $h | get "image.tag" "v2.4.0" }}
+{{- $tag := $h | get "image.tag" "v2.6.4" }}
+{{/*The cloudNativeDb operator is responsible for creating the secret*/}}
 
 externalURL: {{ $externalUrl }}
 fullnameOverride: harbor
 # logLevel - debug, info, warning, error or fatal
 logLevel: warning
-harborAdminPassword: {{ $h | get "adminPassword" $v.otomi.adminPassword }}
+
+harborAdminPassword: {{ $h.adminPassword }}
 nameOverride: harbor
 secretKey: {{ $h | get "secretKey" nil }}
 
-clair:
-  adapter:
-    image:
-      tag: {{ $tag }}
-    resources:
-      {{- with $h | get "resources.clair-adapter" nil }}
-      {{- toYaml . | nindent 6 }}
-      {{- else }}
-      limits:
-        cpu: 400m
-        memory: 256Mi
-      requests:
-        cpu: 100m 
-        memory: 256Mi
-      {{- end }}
-  clair:
-    image:
-      tag: {{ $tag }}
-    resources:
-      {{- with $h | get "resources.clair" nil }}
-      {{- toYaml . | nindent 6 }}
-      {{- else }}
-      requests:
-        cpu: 100m 
-        memory: 1Gi
-      limits:
-        cpu: 400m
-        memory: 2Gi
-      {{- end }}
-  podAnnotations:
-    policy.otomi.io/ignore: psp-allowed-users
+updateStrategy:
+    type: Recreate
 
 chartmuseum:
+  priorityClassName: otomi-critical
   image:
     tag: {{ $tag }}
-  podAnnotations:
-    policy.otomi.io/ignore: psp-allowed-users
-  resources:
-    {{- with $h | get "resources.chartmuseum" nil }}
-    {{- toYaml . | nindent 4 }}
-    {{- else }}
-    requests:
-      cpu: 100m 
-      memory: 128Mi
-    limits:
-      cpu: 400m
-      memory: 256Mi
-    {{- end }}
+  resources: {{- $h.resources.chartmuseum | toYaml | nindent 6 }}
 
 core:
+  secretName: harbor-token-service-ca
+  priorityClassName: otomi-critical
   image:
     tag: {{ $tag }}
-  podAnnotations:
-    policy.otomi.io/ignore: psp-allowed-users
-  resources:
-    {{- with $h | get "resources.core" nil }}
-    {{- toYaml . | nindent 4 }}
-    {{- else }}
-    limits:
-      cpu: 100m
-      memory: 512Mi
-    requests:
-      cpu: 50m
-      memory: 256Mi
-    {{- end }}
+  resources: {{- $h.resources.core | toYaml | nindent 4 }}
   secret: {{ $h | get "core.secret" nil }}
   # secretName: {{ $harborSecretName }}
   xsrfKey: {{ $h | get "core.xsrfKey" nil }}
 
 database:
-  internal:
-    image:
-      tag: {{ $tag }}
-    initContainer:
-      migrator:
-        resources:
-          limits:
-            cpu: 100m
-            memory: 512Mi
-          requests:
-            cpu: 50m
-            memory: 256Mi
-      permissions:
-        resources:
-          limits:
-            cpu: 100m
-            memory: 512Mi
-          requests:
-            cpu: 50m
-            memory: 256Mi
-    resources:
-      {{- with $h | get "resources.database" nil }}
-      {{- toYaml . | nindent 6 }}
-      {{- else }}
-      limits:
-        cpu: 100m
-        memory: 512Mi
-      requests:
-        cpu: 50m
-        memory: 256Mi
-      {{- end }}
-  password: {{ $h | get "adminPassword" $v.otomi.adminPassword }}
-  podAnnotations:
-    # this exception allows the chmod fix to pass, which needs root access:
-    policy.otomi.io/ignore.data-migrator: psp-allowed-users
-  type: internal
+  type: external
+  external:
+    # erase default password value from the Harbor Helm chart
+    password: null
+    coreDatabase: {{ $db.coreDatabase }}
+    username: harbor
+    host: harbor-otomi-db-rw.harbor.svc.cluster.local
+    existingSecret: harbor-otomi-db-app
 
 exporter:
+  priorityClassName: otomi-critical
   image:
     tag: {{ $tag }}
 
@@ -137,23 +63,12 @@ internalTLS:
   enabled: false
 
 jobservice:
+  priorityClassName: otomi-critical
   image:
     tag: {{ $tag }}
   jobLoggers:
     - stdout
-  podAnnotations:
-    policy.otomi.io/ignore: psp-allowed-users
-  resources:
-    {{- with $h | get "resources.jobservice" nil }}
-    {{- toYaml . | nindent 4 }}
-    {{- else }}
-    limits:
-      cpu: 100m
-      memory: 512Mi
-    requests:
-      cpu: 50m
-      memory: 256Mi
-    {{- end }}
+  resources: {{- $h.resources.jobservice | toYaml | nindent 4 }}
   secret: {{ $h | get "jobservice.secret" nil }}
 
 metrics:
@@ -162,64 +77,45 @@ metrics:
     additionalLabels:
       prometheus: system
 
+nginx:
+  resources: {{- $h.resources.nginx | toYaml | nindent 4 }}
+
 notary:
   server:
+    priorityClassName: otomi-critical
     image:
       tag: {{ $tag }}
   signer:
+    priorityClassName: otomi-critical
     image:
       tag: {{ $tag }}
   enabled: false
   secretName: {{ $notarySecretName }}
-  
+
 persistence:
   enabled: true
-  # resourcePolicy: 'keep'
   persistentVolumeClaim:
     registry:
       # Use the existing PVC which must be created manually before bound,
       # and specify the 'subPath' if the PVC is shared with other components
       existingClaim: ''
-      # Specify the 'storageClass' used to provision the volume. Or the default
-      # StorageClass will be used(the default).
-      # Set it to '-' to disable dynamic provisioning
-      {{- if $v._derived.supportedCloud }}
-      storageClass: fast
-      {{- end }}
       subPath: ''
       accessMode: ReadWriteOnce
       size: 10Gi
     chartmuseum:
       existingClaim: ''
-      {{- if $v._derived.supportedCloud }}
-      storageClass: fast
-      {{- end }}
       subPath: ''
       accessMode: ReadWriteOnce
-      {{- if eq $v.cluster.provider "vultr" }}
-      size: 10Gi
-      {{- else }}
       size: 5Gi
-      {{- end }}
     jobservice:
       existingClaim: ''
-      {{- if $v._derived.supportedCloud }}
-      storageClass: fast-immediate
-      {{- end }}
       subPath: ''
       accessMode: ReadWriteOnce
-      {{- if eq $v.cluster.provider "vultr" }}
-      size: 10Gi
-      {{- else }}
       size: 1Gi
-      {{- end }}
     # If external database is used, the following settings for database will
     # be ignored
     database:
       existingClaim: ''
-      {{- if $v._derived.supportedCloud }}
-      storageClass: fast
-      {{- end }}
       subPath: ''
       accessMode: ReadWriteOnce
       size: 1Gi
@@ -227,29 +123,45 @@ persistence:
     # be ignored
     redis:
       existingClaim: ''
-      {{- if $v._derived.supportedCloud }}
-      storageClass: fast
-      {{- end }}
       subPath: ''
       accessMode: ReadWriteOnce
       size: 1Gi
     trivy:
       existingClaim: ''
-      {{- if $v._derived.supportedCloud }}
-      storageClass: fast
-      {{- end }}
       subPath: ''
       accessMode: ReadWriteOnce
-      size: 5Gi
-  # Define which storage backend is used for registry and chartmuseum to store
-  # images and charts. Refer to
-  # https://github.com/docker/distribution/blob/master/docs/configuration.md#storage
-  # for the detail.
+      size: 5Gi   
   imageChartStorage:
-    {{ $imageChartStorageType := $hp | get "imageChartStorage.type" "filesystem" }}
-    type: {{ $imageChartStorageType }}
-    {{- if ne $imageChartStorageType "filesystem" }}
-    {{ $imageChartStorageType }}: {{- toYaml ($hp.imageChartStorage | get $imageChartStorageType) | nindent 6 }}
+    {{- if eq $obj.type "minioLocal" "linode" }}
+    disableredirect: true
+    type: s3
+    s3:
+      {{- if eq $obj.type "minioLocal" }}
+      bucket: harbor
+      region: us-east-1
+      regionendpoint: http://minio.minio.svc.cluster.local:9000
+      accesskey: otomi-admin                          
+      secretkey: {{ $v.otomi.adminPassword }}                            
+      secure: false
+      v4auth: true
+      {{- end }}
+      {{- if eq $obj.type "linode" }}
+      bucket: {{ $obj.linode.buckets.harbor }}
+      regionendpoint: https://{{ $obj.linode.region }}.linodeobjects.com
+      accesskey: {{ $obj.linode.accessKeyId }}               
+      secretkey: {{ $obj.linode.secretAccessKey }}
+      region: {{ $obj.linode.region }}
+      encrypt: false
+      secure: true
+      v4auth: true
+      # By bumping the `multipartcopythresholdsize` option to 5GiB (up from its default
+      # of 32Mib), Distribution will only initiate an asynchronous server-side COPY
+      # operation once the blob is 5GiB in size. This effectively means there will be no
+      # more 403 Forbidden errors from Object Storage unless a layer/blob is > 5GiB in size
+      multipartcopythresholdsize: "5368709120"
+      {{- end }}
+    {{- else }}
+    type: filesystem
     {{- end }}
 
 postgresql:
@@ -257,94 +169,43 @@ postgresql:
     enabled: true
 
 portal:
+  priorityClassName: otomi-critical
   image:
     tag: {{ $tag }}
-  resources:
-    {{- with $h | get "resources.portal" nil }}
-      {{- toYaml . | nindent 4 }}
-    {{- else }}
-    limits:
-      cpu: 400m
-      memory: 256Mi
-    requests:
-      cpu: 100m 
-      memory: 128Mi
-    {{- end }}
-  podAnnotations:
-    policy.otomi.io/ignore: psp-allowed-users
+  resources: {{- $h.resources.portal | toYaml | nindent 4 }}
 
 redis:
   internal:
+    priorityClassName: otomi-critical
     image:
       tag: {{ $tag }}
-  podAnnotations:
-    policy.otomi.io/ignore: psp-allowed-users
   internal:
-    resources:
-      {{- with $h | get "resources.redis" nil }}
-        {{- toYaml . | nindent 6 }}
-      {{- else }}
-      limits:
-        cpu: 400m
-        memory: 256Mi
-      requests:
-        cpu: 100m 
-        memory: 128Mi
-      {{- end }}
+    resources: {{- $h.resources.redis | toYaml | nindent 6 }}
 
 registry:
+  priorityClassName: otomi-critical
   secret: {{ $h | get "registry.secret" nil }}
-  podAnnotations:
-    policy.otomi.io/ignore: psp-allowed-users
 
   registry:
     image:
       tag: {{ $tag }}
-    resources:
-      {{- with $h | get "resources.registry" nil }}
-        {{- toYaml . | nindent 6 }}
-      {{- else }}
-      limits:
-        cpu: 100m
-        memory: 128Mi
-      requests:
-        cpu: 50m
-        memory: 64Mi
-      {{- end }}
+    resources: {{- $h.resources.registry | toYaml | nindent 6 }}
   controller:
     image:
       tag: {{ $tag }}
-    resources:
-      {{- with $h | get "resources.registry-controller" nil }}
-        {{- toYaml . | nindent 6 }}
-      {{- else }}
-      limits:
-        cpu: 100m
-        memory: 512Mi
-      requests:
-        cpu: 50m
-        memory: 256Mi
-      {{- end }}
+    resources: {{- $h.resources.registryController | toYaml | nindent 6 }}
   relativeurls: false
   credentials:
-    username: {{ $h | get "registry.credentials.username" }}
-    password: {{ $h | get "registry.credentials.password" $v.otomi.adminPassword }}
-    htpasswd: {{ $h | get "registry.credentials.htpasswd" nil }}
+    username: {{ $h.registry.credentials.username }}
+    password: {{ $h.registry.credentials.password }}
+    htpasswdString: {{ $h.registry.credentials.htpasswd }}
 
 trivy:
+  priorityClassName: otomi-critical
   image:
     tag: {{ $tag }}
-  resources:
-    {{- with $h | get "resources.trivy" nil }}
-      {{- toYaml . | nindent 6 }}
-    {{- else }}
-      requests:
-        cpu: 100m 
-        memory: 1Gi
-      limits:
-        cpu: 400m
-        memory: 2Gi
-    {{- end }}
+  resources: 
+    {{- $h.resources.trivy | toYaml  | nindent 4 }}
   automountServiceAccountToken: true
 
 {{- with .Values.otomi | get "globalPullSecret" nil }}

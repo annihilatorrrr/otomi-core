@@ -1,0 +1,149 @@
+{{- $v := .Values }}
+{{- $a := $v.apps.argocd }}
+{{- $k := $v.apps.keycloak }}
+global:
+  domain: argocd.{{ $v.cluster.domainSuffix }}
+  {{- with $v.otomi | get "nodeSelector" nil }}
+  nodeSelector:
+    {{- range $key, $val := . }}
+    {{ $key }}: {{ $val }}
+    {{- end }}
+  {{- end }}
+# ApplicationSet Controller
+applicationSet:
+  replicas: {{ $a.applicationSet.replicas }}
+  resources: {{- $a.resources.applicationSet | toYaml | nindent 4 }}
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        prometheus: system
+
+# Application Controller
+controller:
+  replicas: {{ $a.controller.replicas }}
+  resources: {{- $a.resources.controller | toYaml | nindent 4 }}
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        prometheus: system
+
+dex:
+  enabled: false
+
+notifications:
+  enabled: true
+  resources: {{- $a.resources.notifications | toYaml | nindent 4 }}
+
+redis:
+  resources: {{- $a.resources.redis | toYaml | nindent 4 }}
+
+repoServer:
+  autoscaling:
+    enabled: {{ $a.autoscaling.repoServer.enabled }}
+    maxReplicas: {{ $a.autoscaling.repoServer.maxReplicas }}
+    minReplicas: {{ $a.autoscaling.repoServer.minReplicas }}
+    targetMemoryUtilizationPercentage: {{ $a.autoscaling.repoServer.targetMemoryUtilizationPercentage }}
+    targetCPUUtilizationPercentage: {{ $a.autoscaling.repoServer.targetCPUUtilizationPercentage }}
+  resources: {{- $a.resources.repo | toYaml | nindent 4 }}
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        prometheus: system
+
+server:
+  autoscaling:
+    enabled: {{ $a.autoscaling.server.enabled }}
+    maxReplicas: {{ $a.autoscaling.server.maxReplicas }}
+    minReplicas: {{ $a.autoscaling.server.minReplicas }}
+    targetMemoryUtilizationPercentage: {{ $a.autoscaling.server.targetMemoryUtilizationPercentage }}
+    targetCPUUtilizationPercentage: {{ $a.autoscaling.server.targetCPUUtilizationPercentage }}
+  resources: {{- $a.resources.server | toYaml | nindent 4 }}
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        prometheus: system
+
+configs:
+  # General Argo CD configuration
+  ## Ref: https://github.com/argoproj/argo-cd/blob/master/docs/operator-manual/argocd-cm.yaml
+  cm:
+    admin.enabled: "true"
+    application.instanceLabelKey: app.kubernetes.io/instance
+    application.resourceTrackingMethod: annotation
+    ga.anonymizeusers: "false"
+    statusbadge.enabled: "false"
+    url: https://argocd.{{ $v.cluster.domainSuffix }}
+    users.anonymous.enabled: "false"
+    # Note that the clientSecret is not actually used
+    # as for now oauth2-proxy handles the login
+    resource.compareoptions: |
+        # disables status field diffing in specified resource types
+        ignoreAggregatedRoles: true
+    resource.exclusions: |
+        - apiGroups:
+          - "*"
+          kinds:
+          - "TaskRun"
+          clusters:
+          - "*"
+    resource.customizations.knownTypeFields.cert-manager.io_Certificate: |
+        - field: spec.duration
+          type: meta/v1/Duration
+    resource.customizations.ignoreDifferences.apiextensions.k8s.io_CustomResourceDefinition: |
+        jqPathExpressions:
+          - '.metadata.annotations'
+    oidc.config: |
+      name: Otomi
+      issuer: {{ $v._derived.oidcBaseUrl }}
+      clientID: {{ $k.idp.clientID }}
+      clientSecret: '$oidc.clientSecret'
+      requestedScopes:
+        - openid
+        - profile
+        - email
+      {{- if $v._derived.untrustedCA }}
+      rootCA: |
+        {{- $v._derived.caCert | nindent 8 }}
+      {{- end }}
+
+  {{- if $v._derived.untrustedCA }}
+  tls:
+    certificates:
+      gitea.{{ $v.cluster.domainSuffix }}: |
+        {{- $v._derived.caCert | nindent 8 }}
+  {{- end }}
+
+  secret:
+    extra:
+      oidc.clientSecret: {{ $k.idp.clientSecret }}
+  params:
+    server.insecure: true # nginx terminates tls
+    # -- Number of application status processors
+    controller.status.processors: {{ $a.controllerStatusProcessors }}
+    # -- Number of application operation processors
+    controller.operation.processors: {{ $a.controllerOperationProcessors }}
+
+  rbac:
+    policy.csv: |
+      # image updater
+      p, role:image-updater, applications, get, */*, allow
+      p, role:image-updater, applications, update, */*, allow
+      g, image-updater, role:image-updater
+      # admin
+      g, admin, role:admin
+      g, platform-admin, role:admin
+    {{- if $v.otomi.isMultitenant }}
+    policy.default: ''
+    {{- else }}
+      # not multitenant, make platform-admin admin and keep global read-only
+      g, platform-admin, role:admin
+    policy.default: role:readonly
+    {{- end }}

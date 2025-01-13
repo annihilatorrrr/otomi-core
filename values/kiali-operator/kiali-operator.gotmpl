@@ -1,18 +1,17 @@
 {{- $v := .Values }}
 {{- $k := $v.apps.kiali }}
 {{- $kk := $v.apps.keycloak }}
-{{- $appsDomain := printf "apps.%s" $v.cluster.domainSuffix }}
+
+{{- with .Values.otomi | get "globalPullSecret" nil }}
+image:
+  pullSecrets:
+    - name: otomi-pullsecret-global
+{{- end }}
+
 
 image:
-  # @TODO:
-  tag: v1.49
-  {{- with .Values.otomi | get "globalPullSecret" nil }}
-  imagePullSecrets:
-    - name: otomi-pullsecret-global
-  {{- end }}
-
-podAnnotations:
-  policy.otomi.io/ignore: psp-allowed-users
+  repo: quay.io/kiali/kiali-operator
+  tag: v1.86.1
 
 cr:
   create: true
@@ -21,62 +20,37 @@ cr:
     auth:
       strategy: openid
       openid:
-        # TODO: check up on https://github.com/kiali/kiali/issues/5233 for authentication_timeout
         authentication_timeout: 1800
         client_id: {{ $kk.idp.clientID }}
         disable_rbac: true
         issuer_uri: {{ $v._derived.oidcBaseUrl }}
         username_claim: email
     deployment:
-      accessible_namespaces:
-        - '**'
       pod_annotations:
-        policy.otomi.io/ignore: psp-allowed-users
         sidecar.istio.io/inject: "true"
       ingress_enabled: false
       namespace: kiali
-      resources:
-        {{- with $k | get "resources" nil }}
-          {{- toYaml . | nindent 8 }}
-        {{- else }}
-        limits:
-          cpu: 500m
-          memory: 512Mi
-        requests:
-          cpu: 50m
-          memory: 32Mi
-        {{- end }}
+      resources: {{- $k.resources.pod | toYaml  | nindent 8 }}
       verbose_mode: "4"
     external_services:
       grafana:
-        auth:
-          insecure_skip_verify: {{ $v._derived.untrustedCA }}
-          type: bearer
-        dashboards:
-          - name: Istio Service Dashboard
-          - name: Istio Workload Dashboard
-          - name: Istio Mesh Dashboard
-          - name: Istio Control Plane Dashboard
-          - name: Istio Performance Dashboard
-          - name: Istio Wasm Extension Dashboard
-        # TODO: re-enable after fix for: https://github.com/kiali/kiali/issues/5230
         enabled: false
-        in_cluster_url: http://po-grafana.grafana
-        is_core: false
-        url: https://grafana.{{ $v.cluster.domainSuffix }}/?orgId=1
       istio:
         component_status:
           enabled: true
           components:
           - app_label: istiod
             is_core: true
-          - app_label: istio-ingressgateway-public
+            namespace: istio-system
+          - app_label: ingressgateway
             is_core: true
-            is_proxy: true
+            is_proxy: false
+            namespace: istio-system
           {{ if $v.apps.istio.egressGateway.enabled }}
-          - app_label: istio-egressgateway
+          - app_label: egressgateway
             is_core: false
             is_proxy: true
+            namespace: istio-system
           {{- end }}
       prometheus:
         auth:
@@ -88,22 +62,13 @@ cr:
         is_core: false
         url: http://po-prometheus.monitoring:9090/
       tracing:
-        auth:
-          insecure_skip_verify: {{ $v._derived.untrustedCA }}
-          type: none
-        enabled: {{ $v.apps.jaeger.enabled }}
-        in_cluster_url: http://jaeger-operator-jaeger-query.jaeger:16686/jaeger/
-        is_core: false
-        namespace_selector: true
-        url: https://{{ $appsDomain }}/jaeger/
-        use_grpc: false #use different port if use_grpc=true
-        whitelist_istio_system: ["istio-ingressgateway-public","istio-ingressgateway-private","istio-egressgateway"]
+        enabled: true
+        in_cluster_url: "http://query-frontend.tempo:3100"
+        provider: tempo
+        use_grpc: false
+        url: "http://grafana.{{ $v.cluster.domainSuffix }}/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22datasource%22:%7B%22type%22:%22tempo%22,%22uid%22:%22tempo%22%7D%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
     istio_component_namespaces:
       prometheus: monitoring
-      grafana: monitoring
-      {{- if $v.apps.jaeger.enabled }}
-      jaeger: jaeger
-      {{- end }}
     istio_namespace: istio-system
     kiali_feature_flags:
       certificates_information_indicators:
@@ -112,13 +77,7 @@ cr:
         - cacerts
         - istio-ca-secret
     server:
-      web_root: /kiali
-      web_fqdn: {{ $appsDomain }}
+      web_root: ""
+      web_fqdn: kiali.{{ $v.cluster.domainSuffix }}
 
-resources:
-  limits:
-    cpu: 800m
-    memory: 512Mi
-  requests:
-    cpu: 100m
-    memory: 150Mi
+resources: {{- $k.resources.operator | toYaml  | nindent 2 }}

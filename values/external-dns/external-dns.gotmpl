@@ -6,9 +6,6 @@ sources:
 - istio-gateway
 ## - aws, azure, cloudflare, coredns, designate, digitalocoean, google, infoblox, rfc2136
 
-# @TODO:
-image:
-  tag: 0.11.0
 
 {{- range $provider, $config := $dns.provider }}
 {{- $providerConfigKey := $provider | replace "azure-private-dns" "azure" }}
@@ -23,6 +20,7 @@ provider: {{ $provider }}
 domainFilters: {{ $dns | get "domainFilters" | toYaml | nindent 2 }}
 zoneIdFilters: {{ $dns | get "zoneIdFilters" list | toYaml | nindent 2 }}
 annotationFilter: "externaldns=true"
+policy: {{ $dns.policy }}
 logLevel: {{ $externalDns | get "logLevel" }}
 dryRun: false
 crd:
@@ -32,7 +30,7 @@ crd:
 
 rbac:
   create: true
-  pspEnabled: true
+  pspEnabled: false
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
@@ -44,13 +42,7 @@ podSecurityContext:
 
 priorityClassName: otomi-critical
 
-resources:
-  limits:
-    cpu: 100m
-    memory: 128Mi
-  requests:
-    memory: 64Mi
-    cpu: 10m
+resources: {{- $externalDns.resources | toYaml | nindent 4 }}
 
 metrics:
   enabled: true

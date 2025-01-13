@@ -1,4 +1,5 @@
 {{- $v := .Values }}
+{{- $j:= $v.apps.jaeger }}
 {{- $version := "1.29" }}
 jaeger:
   create: true
@@ -9,68 +10,20 @@ jaeger:
       options:
         query:
           base-path: /jaeger
-    agent:
-      resources:
-        limits:
-          cpu: 100m
-          memory: 128Mi
-        requests:
-          cpu: 10m
-          memory: 32Mi
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-      sidecarSecurityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
     annotations:
       sidecar.istio.io/inject: "true"
-    collector:
-      resources:
-        limits:
-          cpu: 100m
-          memory: 128Mi
-        requests:
-          cpu: 10m
-          memory: 32Mi
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-    ingester:
-      resources:
-        limits:
-          cpu: 100m
-          memory: 128Mi
-        requests:
-          cpu: 10m
-          memory: 32Mi
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
     ingress:
       enabled: false
-    resources:
-      limits:
-        cpu: 100m
-        memory: 128Mi
-      requests:
-        cpu: 10m
-        memory: 32Mi
+    resources: {{- $j.resources.jaeger | toYaml | nindent 6 }}
     securityContext:
       runAsNonRoot: true
       runAsUser: 1000
-    strategy: allInOne
+    strategy: allinone
 
 rbac:
   clusterRole: true
 
-resources:
-  limits:
-    cpu: 100m
-    memory: 128Mi
-  requests:
-    cpu: 10m
-    memory: 32Mi
+resources: {{- $j.resources.operator | toYaml | nindent 2 }}
 
 securityContext:
   runAsNonRoot: true

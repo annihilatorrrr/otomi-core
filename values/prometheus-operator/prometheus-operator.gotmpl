@@ -5,9 +5,12 @@
 {{- $a := $v.apps | get "alertmanager" }}
 {{- $g := $v.apps | get "grafana" }}
 {{- $p := $v.apps | get "prometheus" }}
+{{- $t := $v.apps | get "thanos" }}
 {{- $hasKeycloak := $k.enabled }}
-{{- $appsDomain := printf "apps.%s" $v.cluster.domainSuffix }}
-{{- $grafanaDomain := printf "grafana.%s" $v.cluster.domainSuffix }}
+{{- $domain := ($v.cluster | get "domainSuffix" nil) }}
+{{- $alertmanagerDomain := printf "alertmanager.%s" $domain }}
+{{- $prometheusDomain := printf "prometheus.%s" $domain }}
+{{- $grafanaDomain := printf "grafana.%s" $domain }}
 {{- $slackTpl := tpl (readFile "../../helmfile.d/snippets/alertmanager/slack.gotmpl") $v | toString }}
 {{- $opsgenieTpl := tpl (readFile "../../helmfile.d/snippets/alertmanager/opsgenie.gotmpl") $v | toString }}
 # {{- $grafanaIni := tpl (readFile "../../helmfile.d/snippets/grafana.gotmpl") (dict "keycloakBase" $v._derived.oidcBaseUrlBackchannel "untrustedCA" $v._derived.untrustedCA "keycloak" ($k | get "idp")) | toString }}
@@ -23,14 +26,15 @@ global:
   imagePullSecrets:
     - name: otomi-pullsecret-global
 {{- end }}
+
+defaultRules:
+  create: {{ $p.enabled }}
+  disabled:
+    {{- range $p.disabledRules }}
+    {{ . }}: true
+    {{- end }}
 prometheusOperator:
-  resources:
-    limits:
-      cpu: 400m
-      memory: 256Mi
-    requests:
-      cpu: 100m
-      memory: 128Mi
+  resources: {{- $p.resources.prometheusOperator | toYaml | nindent 4 }}
   admissionWebhooks:
     enabled: true
     certManager:
@@ -39,20 +43,27 @@ prometheusOperator:
         name: custom-ca
         kind: ClusterIssuer
   priorityClassName: otomi-critical
+  prometheusConfigReloader:
+    resources: {{- $p.resources.prometheusConfigReloader | toYaml | nindent 6 }}    
 commonLabels:
   prometheus: system
+crds:
+  enabled: false
 prometheus:
   enabled: {{ $p.enabled }}
+  thanosService:
+    enabled: {{ $t.enabled }}
+  thanosServiceMonitor:
+    enabled: {{ $t.enabled }}
   prometheusSpec:
+    {{- if $t.enabled }}
+    thanos:
+      resources: {{- $p.resources.thanosSidecar | toYaml | nindent 8 }}
+      objectStorageConfig:
+        name: thanos-objectstore
+        key: objstore.yml
+    {{- end }}
     {{- range $selType := list "podMonitor" "probe" "rule" "serviceMonitor" }}
-    {{ $selType }}NamespaceSelector:
-      matchExpressions:
-        - key: name
-          operator: NotIn
-          values:
-            {{- range $teamId, $_ := $v.teamConfig }}
-            - team-{{ $teamId }}
-            {{- end }}
     {{ $selType }}Selector:
       matchLabels:
         prometheus: system
@@ -68,41 +79,70 @@ prometheus:
     podMetadata:
       annotations:
         sidecar.istio.io/inject: "true"
-    resources:
-      {{- with $p | get "prometheus.resources" nil }}
-        {{- toYaml . | nindent 6 }}
-      {{- else }}
-      requests:
-        cpu: 100m
-        memory: 512Mi
-      limits:
-        cpu: '3'
-        memory: 3Gi
-      {{- end }}
+    resources: {{- $p.resources.prometheus | toYaml | nindent 6 }}
+    # all team alert managers that will get alerts
+    alertingEndpoints:
+    - name: po-alertmanager
+      namespace: monitoring
+      port: http-web
+      scheme: http
+      apiVersion: v2
+    {{- range $id, $team := $v.teamConfig }}
+    {{- if ($v.teamConfig | get "managedMonitoring" "alertmanager") }}
+    - name: '{{ $id }}-po-alertmanager'
+      namespace: 'team-{{ $id }}'
+      port: http-web
+      scheme: http
+      apiVersion: v2
+    {{- end }}
+    {{- end }}    
     priorityClassName: otomi-critical
     externalLabels:
-      cluster: {{ printf "%s/%s/%s" $v.cluster.owner $v.cluster.provider $v.cluster.name | lower | quote }}
-    retention: {{ $p | get "retention" "1d" }}
+      cluster: "{{ $v.cluster.domainSuffix }}"
+    replicaExternalLabelName: __replica__
+    {{- if $t.enabled }}
+    retention: 6h
+    {{- else }}
+    retention: {{ $p | get "retention" }}
+    {{- end }}
     retentionSize: {{ $p | get "retentionSize" }}
     storageSpec:
       volumeClaimTemplate:
         spec:
-          {{- if $v._derived.supportedCloud }}
-          storageClassName: fast
-          {{- end }}
           resources:
             requests:
               storage: {{ $p | get "storageSize" }}
     enableAdminAPI: true
-    externalUrl: https://{{ $appsDomain }}/prometheus
-{{- if and (not $v.otomi.isMultitenant) $hasServices }}
+    externalUrl: https://{{ $prometheusDomain }}
+    {{- if $c.tempo.enabled }}
+    enableRemoteWriteReceiver: true
+    {{- end }}
+    {{- if $hasServices }}
     additionalScrapeConfigs:
-  {{- range $teamId, $team := $v.teamConfig }}
+    {{- range $teamId, $team := $v.teamConfig }}
     {{- $teamServices := ($team | get "services" list) }}
-    {{- $domain := printf "team-%s.%s" $teamId $v.cluster.domainSuffix }}
+    {{- $domain := $v.cluster.domainSuffix }}
     {{- tpl (readFile "../../helmfile.d/snippets/blackbox-targets.gotmpl") (dict "teamId" $teamId "services" $teamServices "domain" $domain) | nindent 6 }}
-  {{- end }}
-{{- end }}
+    {{- end }}
+    {{- end }}
+    {{- if $p.remoteWrite.enabled }}
+    remoteWrite:
+    - url: "{{ $p.remoteWrite.rwConfig.target }}"
+      {{- if $p.remoteWrite.rwConfig.basicAuth.enabled }}
+      basicAuth:
+        username:
+          name: prometheus-remote-write-basic-auth
+          key: username
+        password:
+          name: prometheus-remote-write-basic-auth
+          key: password
+      {{- end }}
+      tlsConfig:
+        insecureSkipVerify: {{ $p.remoteWrite.rwConfig.insecureSkipVerify }}
+      {{- with $p | get "remoteWrite.rwConfig.customConfig" nil }}
+      {{- . | nindent 6 }}
+      {{- end }}
+    {{- end }}
   additionalPodMonitors:
     {{- range $m := (tpl (readFile "pod-monitors.gotmpl") $v | fromYaml) | get "additionalPodMonitors" }}
     - {{- toYaml $m | nindent 6 }}
@@ -112,20 +152,22 @@ prometheus:
   additionalServiceMonitors:
     {{- range $m := (tpl (readFile "service-monitors.gotmpl") $v | fromYaml) | get "additionalServiceMonitors" }}
     - {{- toYaml $m | nindent 6 }}
-      additionalLabels:
-        prometheus: system
     {{- end }}
-{{ if or (not $v.otomi.isMultitenant) (eq $v.cluster.provider "aws") }}  
 additionalPrometheusRules:
-  {{- if not $v.otomi.isMultitenant }}
   - name: blackbox
     {{- readFile "rules/blackbox.yaml" | nindent 4 }}
+  {{ if $v.platformBackups.database.gitea.enabled }}
+  - name: gitea-db-backup
+    {{- readFile "rules/gitea-db-backup.yaml" | nindent 4 }}
   {{- end }}
-  {{- if eq $v.cluster.provider "aws" }}
-  - name: cluster-autoscaler
-    {{- readFile "rules/cluster-autoscaler.yaml" | nindent 4 }}
+  {{ if $v.platformBackups.database.harbor.enabled }}
+  - name: harbor-db-backup
+    {{- readFile "rules/harbor-db-backup.yaml" | nindent 4 }}
   {{- end }}
-{{- end }}
+  {{ if $v.platformBackups.database.keycloak.enabled }}
+  - name: keycloak-db-backup
+    {{- readFile "rules/keycloak-db-backup.yaml" | nindent 4 }}
+  {{- end }}
 alertmanager:
   enabled: {{ $a.enabled }}
   alertmanagerSpec:
@@ -140,90 +182,128 @@ alertmanager:
       {{- end }}
       pullPolicy: {{ $a | get "image.pullPolicy" "IfNotPresent" }}
     priorityClassName: otomi-critical
-    resources:
-      {{- with $a | get "resources" nil }}
-        {{- toYaml . | nindent 4 }}
-      {{- else }}
-      limits:
-        cpu: 500m
-        memory: 256Mi
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      {{- end }}
-    externalUrl: https://{{ $appsDomain }}/alertmanager
+    resources: {{- $a.resources.alertmanager | toYaml | nindent 6 }}
+    externalUrl: https://{{ $alertmanagerDomain }}
   config: {{- tpl (readFile "../../helmfile.d/snippets/alertmanager.gotmpl") (dict "instance" $v "root" $v "slackTpl" $slackTpl "opsgenieTpl" $opsgenieTpl) | nindent 4 }}
 grafana:
   enabled: {{ $g.enabled }}
+  defaultDashboardsEnabled: false
   nameOverride: po-grafana
   fullnameOverride: po-grafana
   namespaceOverride: grafana
   defaultDashboardsTimezone: browser
-  downloadDashboards:
-    resources:
-      limits:
-        cpu: 100m
-        memory: 100Mi
-      requests:
-        cpu: 50m
-        memory: 50Mi
+  assertNoLeakedSecrets: false
   image:
     {{- with $g | get "image.tag" nil }}
     tag: {{ . }}
     {{- end }}
     pullPolicy: {{ $g | get "image.pullPolicy" "IfNotPresent" }}
-  resources:
-    {{- with $g | get "resources" nil }}
-      {{- toYaml . | nindent 4 }}
-    {{- else }}
-    limits:
-      cpu: 500m
-      memory: 256Mi
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    {{- end }}
+  resources: {{- $g.resources.grafana | toYaml | nindent 4 }}
   sidecar:
-    resources:
-      limits:
-        cpu: 100m
-        memory: 100Mi
-      requests:
-        cpu: 50m
-        memory: 50Mi
+    resources: {{- $g.resources.sidecar | toYaml | nindent 6 }}
+    dashboards:
+      enabled: true
+      label: release
+      labelValue: grafana-dashboards
+    {{- if $t.enabled }}  
+    datasources:
+      isDefaultDatasource: false
+    {{- end }}
   serviceMonitor:
-    # namespace: grafana
+    enabled: {{ $p.enabled }}
     labels:
       prometheus: system
-
   testFramework:
-    enabled: false
-    
+    enabled: false  
   plugins:
     - grafana-piechart-panel
   additionalDataSources:
+    {{- if $c.loki.enabled }}
     - name: Loki
       editable: false
+      uid: loki
       type: loki
       access: proxy
-      url: http://loki.monitoring:3100
-      {{- if $v.otomi.isMultitenant }}
-      url: http://loki.monitoring:3101
+      url: http://loki-query-frontend-headless.monitoring:3101
       basicAuth: true
       basicAuthUser: otomi-admin
       secureJsonData:
         basicAuthPassword: {{ $v.apps.loki.adminPassword }}
-      {{- else }}
-      url: http://loki.monitoring:3100
-      {{- end }}
-    {{- if $v | get "azure.monitor" nil }}
-    - {{- tpl (readFile "../../helmfile.d/snippets/azure-monitor.gotmpl") $v.azure.monitor | toString | nindent 6 }}
+    {{- if $t.enabled }}
+    - name: Thanos Query
+      access: proxy
+      isDefault: true
+      basicAuth: false
+      editable: false
+      orgId: 1
+      type: prometheus
+      url: http://thanos-query.thanos:9090
+      jsonData:
+        prometheusType: Thanos
+        timeInterval: "60s"
+    {{- end }}
+    {{- if $c.tempo.enabled }}
+      jsonData:
+        derivedFields:
+          - datasourceName: Tempo
+            matcherRegex: "traceID=00-([^\\-]+)-"
+            name: TraceID
+            url: "$${__value.raw}"
+            datasourceUid: tempo
+    - name: Tempo
+      type: tempo
+      uid: tempo
+      access: proxy
+      editable: true
+      url: http://tempo-query-frontend.tempo:3100
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: 'loki'
+          spanStartTimeShift: '1h'
+          spanEndTimeShift: '-1h'
+          filterByTraceID: false
+          filterBySpanID: false
+          customQuery: true
+          query: '{namespace=~".+"} |= "$${__span.traceId}"'
+        tracesToMetrics:
+          datasourceUid: 'prometheus'
+          spanStartTimeShift: '1h'
+          spanEndTimeShift: '-1h'
+          tags: [{ key: 'service.name', value: 'service' }, { key: 'job' }]
+          queries:
+            - name: 'Span duration (example)'
+              query: 'sum(rate(traces_spanmetrics_latency_bucket{$$__tags}[5m]))'
+        serviceMap:
+          datasourceUid: 'prometheus'
+        nodeGraph:
+          enabled: true
+        search:
+          hide: false
+        traceQuery:
+          timeShiftEnabled: true
+          spanStartTimeShift: '1h'
+          spanEndTimeShift: '-1h'
+        spanBar:
+          type: 'Tag'
+          tag: 'http.path'
+        httpMethod: GET
+        lokiSearch:
+          datasourceUid: 'loki'
+    {{- end }}
     {{- end }}
   adminPassword: {{ $g | get "adminPassword" $v.otomi.adminPassword }}
   grafana.ini: {{- $grafanaIni | nindent 4 }}
     server:
       root_url: https://{{ $grafanaDomain }}
       # serve_from_sub_path: true
+    security:
+      allow_embedding: true
+
+kubernetesServiceMonitors:
+  enabled: {{ $p.enabled }}
+
+kubeStateMetrics:
+  enabled: {{ $p.enabled }}
 
 kube-state-metrics:
   prometheus:
@@ -238,14 +318,11 @@ kube-state-metrics:
   resources:
     {{- with $p | get "resources.kube-state-metrics" nil }}
       {{- toYaml . | nindent 4 }}
-    {{- else }}
-    limits:
-      cpu: 100m
-      memory: 256Mi
-    requests:
-      cpu: 100m
-      memory: 128Mi
     {{- end }}
+
+
+nodeExporter:
+  enabled: {{ $p.enabled }}
 
 prometheus-node-exporter:
   prometheus:
@@ -258,23 +335,14 @@ prometheus-node-exporter:
     {{- end }}
     pullPolicy: {{ $p | get "image.node-exporter.pullPolicy" "IfNotPresent" }}
   resources:
-    {{- with $p | get "resources.prometheus-node-exporter" nil }}
+    {{- with $p | get "resources.node-exporter" nil }}
       {{- toYaml . | nindent 4 }}
-    {{- else }}
-    limits:
-      cpu: 500m
-      memory: 128Mi
-    requests:
-      cpu: 100m
-      memory: 128Mi
     {{- end }}
   priorityClassName: otomi-critical
-  podAnnotations:
-    policy.otomi.io/ignore: psp-host-filesystem,psp-host-networking-ports,psp-host-security
 
 kubeProxy:
   enabled: false
 kubeScheduler:
   enabled: false
 kubeControllerManager:
-  enabled: flase
+  enabled: false

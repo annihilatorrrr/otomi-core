@@ -1,0 +1,10 @@
+resources:
+    requests:
+        cpu: 50m
+        memory: 32Mi
+    limits:
+        cpu: 100m
+        memory: 64Mi
+deployment:
+  secretName: external-dns
+  secretKey: secret

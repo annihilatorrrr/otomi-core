@@ -1,24 +1,26 @@
 {{- $v := .Values }}
-{{- $n := $v.apps | get "ingress-nginx" }}
 {{- $ingress := (index $v.ingress.classes (.Release.Labels.index | int)) }}
-{{- $privateNetwork := eq "private" ($ingress | get "network" "public")  }}
+{{- $appName := printf "ingress-nginx-%s" $ingress.className }}
+{{- $app := $v.apps | get $appName dict }}
+{{/* appDefaults - each ingress-nginx Helm realse will use default values defined in defaults.yaml in app.ingress-nginx context*/}}
+{{- $appDefaults := $v | get "apps.ingress-nginx" }}
+{{- $n := deepCopy $appDefaults | merge $app }}
+
 nameOverride: {{ .Release.Name }}
 
-
 controller:
+  enableAnnotationValidations: true
+  allowSnippetAnnotations: true
   # @TODO:
   electionID: ingress-controller-leader-{{ $ingress.className }}
   ingressClassResource: 
     enabled: false
     controllerValue: k8s.io/{{ $ingress.className }}
-  # ingressClass: {{ $ingress.className }}
   image:
-    tag: v1.0.5
-    tag: {{ $n | get "image.tag" "v1.1.2" }}
     pullPolicy:  {{ $n | get "image.pullPolicy" "IfNotPresent" }}
   scope:
     enabled: true
-    namespace: {{ $v.otomi.hasCloudLB | ternary "ingress" "istio-system" }}
+    namespace: "istio-system"
   containerPort:
     http: 80
     https: 443
@@ -27,34 +29,23 @@ controller:
     patch:
       priorityClassName: otomi-critical
   useComponentLabel: true
-  # set fixed allocation with limits same as requests
-  resources:
-    {{- if (hasKey $n "resources") }}
-      {{- $n.resources | toYaml | nindent 4 }}
-    {{- else }}
-    limits:
-        cpu: 2
-        memory: 1.5Gi
-    requests:
-        cpu: 200m
-        memory: 512Mi
-    {{- end }}
-  podAnnotations:
-    # sidecar.istio.io/inject: {{ if $v.otomi.hasCloudLB }}"true"{{ else }}"false"{{ end }}
-    policy.otomi.io/ignore: psp-privileged
-
+  resources: {{- $n.resources.controller | toYaml | nindent 4 }}
+  opentelemetry:
+    enabled: {{ $n.tracing.enabled }}
+    containerSecurityContext:
+      runAsUser: 65534
+      runAsGroup: 65534
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+    resources: {{- $n.resources.opentelemetry | toYaml | nindent 6 }}
   replicaCount: 2
   minAvailable: 1
   autoscaling:
     enabled: {{ $n.autoscaling.enabled }}
     minReplicas: {{ $n.autoscaling.minReplicas }}
     maxReplicas: {{ $n.autoscaling.maxReplicas }}
-    targetCPUUtilizationPercentage: 60
-    targetMemoryUtilizationPercentage: 75
-{{- if eq $v.cluster.provider "azure" }}
-  nodeSelector: 
-    beta.kubernetes.io/os: linux
-{{- end }}
+    targetCPUUtilizationPercentage: {{ $n.autoscaling.targetCPUUtilizationPercentage }}
+    targetMemoryUtilizationPercentage: {{ $n.autoscaling.targetMemoryUtilizationPercentage }}
   priorityClassName: otomi-critical
   extraArgs:
     v: 3
@@ -92,11 +83,22 @@ controller:
     # log-format-escape-json: true
     log-format-upstream: $proxy_protocol_addr - $remote_user [$time_local] $host "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_length $request_time [$proxy_upstream_name] [$proxy_alternative_upstream_name] $upstream_addr $upstream_response_length $upstream_response_time $upstream_status $req_id
     # log-format-upstream: '{"time":"$time_iso8601","remote_addr":"$proxy_protocol_addr","x_forward_for":"$proxy_add_x_forwarded_for","request_id":"$req_id","remote_user":"$remote_user","bytes_sent":$bytes_sent,"request_time":$request_time,"status":$status,"vhost":"$host","request_proto":"$server_protocol","path":"$uri","request_query":"$args","request_length":$request_length,"duration":$request_time,"method":"$request_method","http_referrer":"$http_referer","http_user_agent":"$http_user_agent"}'
-    ssl-redirect: {{ not $v.otomi.hasCloudLB }}
-    use-forwarded-headers: {{ $v.otomi.hasCloudLB }}
-    {{- if eq $v.cluster.provider "aws" }}
+    ssl-redirect: true
+    use-forwarded-headers: false
     use-proxy-protocol: true
-    {{- end }}
+    enable-opentelemetry: {{ $n.tracing.enabled }}
+    otel-sampler: AlwaysOn
+    otel-sampler-ratio: {{ $n.tracing.samplingRatio }}
+    otlp-collector-host: otel-collector-collector.otel.svc
+    otlp-collector-port: 4317
+    opentelemetry-config: "/etc/nginx/opentelemetry.toml"
+    opentelemetry-operation-name: "HTTP $request_method $service_name $uri"
+    opentelemetry-trust-incoming-span: "true"
+    otel-max-queuesize: "2048"
+    otel-schedule-delay-millis: "5000"
+    otel-max-export-batch-size: "512"
+    otel-service-name: "nginx-{{ $ingress.className }}"
+    otel-sampler-parent-based: "true"
   stats:
     enabled: true
   metrics:
@@ -107,38 +109,18 @@ controller:
         prometheus: system
   service:
     externalTrafficPolicy: Local
-    type: {{ if $v.otomi.hasCloudLB }}{{ if eq $v.cluster.provider "azure" }}ClusterIP{{ else }}NodePort{{ end}}{{ else }}LoadBalancer{{ end }}
+    type: LoadBalancer
     omitClusterIP: true
     {{- with $ingress | get "loadBalancerIP" nil }}
     loadBalancerIP: {{ . }}
     {{- end }}
     annotations:
       dummy: 'true'
-      {{- with $ingress | get "service.annotations" nil }}
-      {{ toYaml . | indent 6 }}
+    {{- with $ingress | get "annotations" nil }}
+      {{- range . }}
+      {{ .key }}: "{{ .value }}"
       {{- end }}
-      {{- if eq $v.cluster.provider "azure" }}
-      {{- with $ingress | get "loadBalancerRG" nil }}
-      service.beta.kubernetes.io/azure-load-balancer-resource-group: {{ . }}
-      {{- end }}
-      {{- if $privateNetwork }}
-      service.beta.kubernetes.io/azure-load-balancer-internal: "true"
-        {{- with $ingress | get "loadBalancerIP" nil }}
-      service.beta.kubernetes.io/azure-load-balancer-internal-subnet: "{{ . }}"
-        {{- end }}
-      {{- end }}
-      {{- end }} {{/* if eq $v.cluster.provider "azure" */}}
-      {{- if eq $v.cluster.provider "aws" }}
-      service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: '*'
-      {{- if $privateNetwork }}
-      service.beta.kubernetes.io/aws-load-balancer-internal: true
-      {{- end }}
-      {{- end }} {{/* if eq $v.cluster.provider "aws" */}}
-      {{- if eq $v.cluster.provider "google" }}
-      {{- if $privateNetwork }}
-      networking.gke.io/load-balancer-type: "Internal"
-      {{- end }}
-      {{- end }} {{/* if eq $v.cluster.provider "google" */}}
+    {{- end }}   
   publishService:
     enabled: true
 
@@ -146,20 +128,7 @@ defaultBackend:
   enabled: true
   useComponentLabel: true
   priorityClassName: otomi-critical
-  resources:
-    limits:
-      cpu: 20m
-      memory: 20Mi
-    requests:
-      cpu: 10m
-      memory: 10Mi
-
-  # podAnnotations:
-  #   sidecar.istio.io/inject: {{ if $v.otomi.hasCloudLB }}"true"{{ else }}"false"{{ end }}
-{{- if eq $v.cluster.provider "azure" }}
-  nodeSelector: 
-    beta.kubernetes.io/os: linux
-{{- end }}
+  resources: {{- $n.resources.defaultBackend | toYaml | nindent 4 }}
   service:
     omitClusterIP: true
 rbac:

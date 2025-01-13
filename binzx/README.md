@@ -1,9 +1,9 @@
 # How to use the new otomi cli
 
 ```sh
-# In the otomi-core directory
+# In the apl-core directory
 export DOCKER_TAG=binzx
-docker build --target prod -t otomi/core:binzx .
+docker build --target prod -t linode/apl-core:binzx .
 ./binzx/otomi <commands here>
 ```
 
@@ -60,7 +60,6 @@ npm run compile:watch &
 |  🟨   | bin/aliases                     |
 |  ⬜   | bin/build-constraints.sh        |
 |  ⬜   | bin/job-presync.sh              |
-|  ⬜   | bin/skeleton-chart.sh           |
 |       |                                 |
 |  ⬜   | bin/hooks/pre-commit            |
 |  --   | ------------------------------- |

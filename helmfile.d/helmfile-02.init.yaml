@@ -12,33 +12,9 @@ bases:
 {{- $a := $v.apps }}
 
 releases:
-  - name: snapshot-controller
-    installed: {{ $a | get "snapshot-controller.enabled" }}
-    namespace: kube-system
-    labels:
-      init: true
-      pkg: csi
-      provider: aws 
-    <<: *default
   - name: metrics-server
     installed: {{ $a | get "metrics-server.enabled" }}
     namespace: kube-system
-    <<: *default
-  - name: tigera-operator
-    installed: {{ $a | get "tigera-operator.enabled" }}
-    namespace: tigera-operator
-    labels:
-      init: true
-      pkg: calico
-    <<: *default
-  - name: aws-ebs-csi-driver
-    installed: {{ $a | get "aws-ebs-csi-driver.enabled" }}
-    needs: [snapshot-controller]
-    namespace: kube-system
-    labels:
-      init: true
-      pkg: csi
-      provider: aws 
     <<: *default
   - name: ingress-nginx-artifacts
     installed: true
@@ -60,12 +36,22 @@ releases:
     chart: ../charts/ingress-nginx
     values:
       - ../values/ingress-nginx/ingress-nginx.gotmpl
-      - ./snippets/ingress-nginx-raw.gotmpl
+      - ./snippets/common.gotmpl
     <<: *upgrade
 {{- end }}
-  - name: operator-lifecycle-manager
+  - name: cloudnative-pg
     installed: true
-    namespace: operator-lifecycle-manager
+    namespace: cnpg-system
     labels:
-      olm: true
+      pkg: cloudnative-pg
+      app: core
     <<: *default
+  - name: cloudnative-pg-artifacts
+    installed: true
+    namespace: cnpg-system
+    labels:
+      pkg: cloudnative-pg
+      app: core
+    chart: ../charts/raw
+    values:
+      - ../values/cloudnative-pg/cloudnative-pg-raw.gotmpl

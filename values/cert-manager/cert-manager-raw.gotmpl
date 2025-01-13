@@ -2,13 +2,10 @@
 {{- $cm := index $v.apps "cert-manager" }}
 {{- $dns := $v | get "dns" dict }}
 {{- $p := $dns | get "provider" dict }}
-{{- $certTpl := readFile "../../helmfile.d/snippets/certificate.gotmpl" }}
-{{- $vars := tpl (readFile "../../helmfile.d/snippets/domains.gotmpl") $v | fromYaml }}
 {{- $issuerName := ternary (printf "%s-%s" $cm.issuer ($cm | get "stage" "")) $cm.issuer (eq $cm.issuer "letsencrypt") }}
-{{- $doms := tpl (readFile "../../helmfile.d/snippets/domains.gotmpl") $v | fromYaml }}
 resources:
 
-{{- if $v.otomi.hasExternalDNS }}
+{{- if and $v.otomi.hasExternalDNS (or (not (hasKey $p "aws")) ($p | get "aws.credentials.secretKey" nil)) }}
   - apiVersion: v1
     kind: Secret
     metadata:
@@ -16,16 +13,22 @@ resources:
     data:
       {{- if hasKey $p "google" }}
       secret: "{{ $p.google.serviceAccountKey | b64enc }}"
-      {{- else if or (hasKey $p "azure-private-dns") }}
+      {{- else if hasKey $p "akamai" }}
+      access_token: {{ $p.akamai.accessToken | b64enc | quote }}
+      client_token: {{ $p.akamai.clientToken | b64enc | quote }}
+      client_secret: {{ $p.akamai.clientSecret | b64enc | quote }}
+      {{- else if hasKey $p "azure-private-dns" }}
       secret: "{{ $p | get "azure-private-dns.aadClientSecret" | b64enc }}"
-      {{- else if or (hasKey $p "azure") }}
+      {{- else if hasKey $p "azure" }}
       secret: "{{ $p.azure.aadClientSecret | b64enc }}"
-      {{- else if ($p | get "$p.aws.credentials.secretKey" nil) }}
+      {{- else if and (hasKey $p "aws") ($p | get "aws.credentials.secretKey" nil) }}
       secret: "{{ $p.aws.credentials.secretKey | b64enc }}"
       {{- else if hasKey $p "digitalocean" }}
       secret: "{{ $p.digitalocean.apiToken | b64enc }}"
       {{- else if hasKey $p "cloudflare" }}
       secret: "{{ $p.cloudflare.apiToken | b64enc }}"
+      {{- else if hasKey $p "linode" }}
+      secret: "{{ $p.linode.apiToken | b64enc }}"
       {{- end }}
 {{- end }}
   - apiVersion: cert-manager.io/v1
@@ -49,6 +52,19 @@ resources:
         solvers:
           - selector: {}
             dns01:
+              {{- with $p | get "akamai" nil }}
+              akamai:
+                serviceConsumerDomain: {{ .host }}
+                accessTokenSecretRef:
+                  name: external-dns
+                  key: access_token
+                clientTokenSecretRef:
+                  name: external-dns
+                  key: client_token
+                clientSecretSecretRef:
+                  name: external-dns
+                  key: client_secret
+              {{- end }}
               {{- with $p | get "aws" nil }}
               route53:
                 {{- with . | get "credentials.accessKey" nil }}
@@ -111,6 +127,14 @@ resources:
                   key: secret
                   name: external-dns
               {{- end }}
+              {{- with $p | get "linode" nil }}
+              webhook:
+                solverName: "linode"
+                groupName: acme.slicen.me
+                config:
+                  secretKey: secret
+                  secretName: external-dns
+              {{- end }}
               {{- with $p | get "google" nil }}
               cloudDNS:
                 project: {{ .project }}
@@ -122,10 +146,37 @@ resources:
               {{- toYaml . | get "cert-manager" nindent 14 }}
               {{- end }}
 {{- end }}
-# generate all da certs
-{{- range $domain, $domInfo := $doms }}
-  {{- if not $domInfo.hasCert }}
-    {{- $certName := ($domain | replace "." "-") }}
-  - {{ tpl $certTpl (dict "otomi" $v.otomi "domain" $domain "name" $certName "issuer" $cm.issuer "issuerName" $issuerName) | nindent 4 }}
-  {{- end }}
+{{- if eq $cm.issuer "byo-wildcard-cert" }}
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: otomi-byo-wildcard-cert
+      namespace: istio-system
+    type: kubernetes.io/tls
+    data:
+      tls.crt: {{ $cm.byoWildcardCert | b64enc }}
+      tls.key: {{ $cm.byoWildcardCertKey | b64enc }}
+{{- end }}
+{{- if or (eq $cm.issuer "letsencrypt" ) (eq $cm.issuer "custom-ca" ) }}
+  - apiVersion: cert-manager.io/v1
+    kind: Certificate
+    metadata:
+      name: otomi-wildcard
+      namespace: istio-system
+    spec:
+      secretName: otomi-cert-manager-wildcard-cert
+      commonName: '*.{{ $v.cluster.domainSuffix }}'
+      dnsNames:
+      - '*.{{ $v.cluster.domainSuffix }}'
+      issuerRef:
+        kind: ClusterIssuer
+        name: {{ $issuerName }}
+      usages:
+        {{- if eq $issuerName "custom-ca" }}
+        - server auth
+        {{- else }}
+        - digital signature
+        - key encipherment
+        - ocsp signing
+        {{- end }}
 {{- end }}

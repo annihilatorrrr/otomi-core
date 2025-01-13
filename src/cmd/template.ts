@@ -1,9 +1,9 @@
+import { prepareEnvironment } from 'src/common/cli'
+import { DebugStream, terminal } from 'src/common/debug'
+import { hfTemplate } from 'src/common/hf'
+import { getFilename } from 'src/common/utils'
+import { HelmArguments, getParsedArgs, helmOptions, setParsedArgs } from 'src/common/yargs'
 import { Argv } from 'yargs'
-import { prepareEnvironment } from '../common/cli'
-import { DebugStream, terminal } from '../common/debug'
-import { hfTemplate } from '../common/hf'
-import { getFilename } from '../common/utils'
-import { getParsedArgs, HelmArguments, helmOptions, setParsedArgs } from '../common/yargs'
 
 interface Arguments extends HelmArguments {
   outDir: string
@@ -14,12 +14,12 @@ const cmdName = getFilename(__filename)
 const template = async (): Promise<void> => {
   const d = terminal(`cmd:${cmdName}:template`)
   const argv = getParsedArgs() as Arguments
-  d.info('Templating STARTED')
+  d.info('# Templating STARTED')
   await hfTemplate(argv, argv.outDir, {
     stdout: new DebugStream(console.log),
     stderr: new DebugStream(console.error),
   })
-  d.info('Templating DONE')
+  d.info('# Templating DONE')
 }
 
 export const module = {

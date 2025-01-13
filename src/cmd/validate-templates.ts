@@ -1,15 +1,15 @@
 import { readFileSync, rmSync } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
 import { loadAll } from 'js-yaml'
+import { cleanupHandler, prepareEnvironment } from 'src/common/cli'
+import { terminal } from 'src/common/debug'
+import { hfTemplate } from 'src/common/hf'
+import { getFilename, readdirRecurse, rootDir } from 'src/common/utils'
+import { getK8sVersion } from 'src/common/values'
+import { BasicArguments, HelmArguments, getParsedArgs, helmOptions, setParsedArgs } from 'src/common/yargs'
 import tar from 'tar'
 import { Argv } from 'yargs'
-import { $, cd, chalk, nothrow } from 'zx'
-import { cleanupHandler, prepareEnvironment } from '../common/cli'
-import { terminal } from '../common/debug'
-import { hfTemplate } from '../common/hf'
-import { getFilename, readdirRecurse, rootDir } from '../common/utils'
-import { getK8sVersion } from '../common/values'
-import { BasicArguments, getParsedArgs, HelmArguments, helmOptions, setParsedArgs } from '../common/yargs'
+import { $, cd, chalk } from 'zx'
 
 const cmdName = getFilename(__filename)
 
@@ -75,7 +75,7 @@ type crdSchema = {
 
 const processCrd = (path: string): crdSchema[] => {
   const d = terminal(`cmd:${cmdName}:processCrd`)
-  d.info('Processing CRD file: ', path)
+  d.debug('Processing CRD file: ', path)
 
   const documents: any[] = loadAll(readFileSync(path, 'utf-8')).filter(
     (singleDoc: any) => singleDoc?.kind === 'CustomResourceDefinition',
@@ -116,7 +116,7 @@ const processCrdWrapper = async (argv: BasicArguments) => {
   d.log('Processing CRD files...')
   cd(rootDir)
   const chartsFiles = await readdirRecurse('charts')
-  const crdFiles = chartsFiles.filter((val: string) => val.match(/\/crds\/.*\.yaml/g))
+  const crdFiles = chartsFiles.filter((val: string) => val.match(/(?<!\/templates)\/crds\/.*\.yaml/g))
   const results = await Promise.all(crdFiles.flatMap((crdFile: string): crdSchema[] => processCrd(crdFile)))
 
   const prep: Promise<any>[] = []
@@ -136,59 +136,41 @@ export const validateTemplates = async (): Promise<void> => {
   const argv: HelmArguments = getParsedArgs()
   await setup(argv)
   await processCrdWrapper(argv)
-  const constraintKinds = [
-    'PspAllowedRepos',
-    'BannedImageTags',
-    'ContainerLimits',
-    'PspAllowedUsers',
-    'PspHostFilesystem',
-    'PspHostNetworkingPorts',
-    'PspPrivileged',
-    'PspApparmor',
-    'PspCapabilities',
-    'PspForbiddenSysctls',
-    'PspHostSecurity',
-    'PspSeccomp',
-    'PspSelinux',
-  ]
-  // TODO: revisit these excluded resources and see it they exist now (from original sh script)
-  const skipKinds = ['CustomResourceDefinition', ...constraintKinds]
-  const skipFilenames = ['crd', 'constraint']
+  const skipKinds = ['CustomResourceDefinition']
+  const skipFilenames = ['crd']
 
   d.log('Validating resources')
-  const quiet = !argv.verbose ? [] : ['--quiet']
+  const verbose = argv.verbose ? ['-verbose'] : []
   d.info(`Schema Output Path: ${schemaOutputPath}`)
   d.info(`Skip kinds: ${skipKinds.join(', ')}`)
   d.info(`Skip Filenames: ${skipFilenames.join(', ')}`)
   d.info(`K8S Resource Path: ${k8sResourcesPath}`)
   d.info(`Schema location: file://${schemaOutputPath}`)
-  const kubevalOutput = await nothrow(
-    $`kubeval ${quiet} --skip-kinds ${skipKinds.join(',')} --ignored-filename-patterns ${skipFilenames.join(
+  const skipPatterns = skipFilenames.flatMap((filename) => ['-ignore-filename-pattern', filename])
+  d.info(
+    `Running command: kubeconform -skip ${skipKinds.join(
       ',',
-    )} -d ${k8sResourcesPath} --schema-location file://${schemaOutputPath} --kubernetes-version ${k8sVersion}`,
+    )} ${skipPatterns} -schema-location ${schemaOutputPath}/${vk8sVersion}-standalone/{{.ResourceKind}}{{.KindSuffix}}.json -summary -output json ${verbose} ${k8sResourcesPath}`,
   )
-  ;`${kubevalOutput.stdout}\n${kubevalOutput.stderr}`.split('\n').forEach((x) => {
-    if (x === '') return
-    const [left, right] = x.split(' - ')
-    const k = left ? left.trim() : ''
-    const v = right ? right.trim() : ''
-    switch (k) {
-      case 'PASS':
-        d.info(`${chalk.greenBright('PASS')}: ${chalk.italic('%s')}`, v)
-        break
-      case 'WARN':
-        d.warn(`${chalk.yellowBright('WARN')}: %s`, v)
-        break
-      case 'ERR':
-        d.error(`${chalk.redBright('ERR')}: %s`, v)
-        break
-      default:
-        break
-    }
-  })
-  if (kubevalOutput.exitCode !== 0) {
-    throw new Error(`Template validation FAILED: ${kubevalOutput.exitCode}`)
-  } else d.log('Template validation SUCCESS')
+
+  const kubeconformOutput = await $`kubeconform -skip ${skipKinds.join(
+    ',',
+  )} ${skipPatterns} -schema-location ${schemaOutputPath}/${vk8sVersion}-standalone/{{.ResourceKind}}{{.KindSuffix}}.json -summary -output json ${verbose} ${k8sResourcesPath}`.nothrow()
+
+  if (kubeconformOutput.exitCode !== 0) {
+    d.info('Kubeconform output: %s', kubeconformOutput.toString())
+    throw new Error(`Template validation FAILED: ${kubeconformOutput.exitCode}`)
+  }
+
+  const parsedOutput = JSON.parse(kubeconformOutput.stdout)
+  const { valid, invalid, errors, skipped } = parsedOutput.summary
+
+  d.info(`${chalk.greenBright('TOTAL PASS')}: %s`, `${valid} files`)
+  d.info(`${chalk.magentaBright('TOTAL SKIP')}: %s`, `${skipped} files`)
+  d.info(`${chalk.yellowBright('TOTAL WARN')}: %s`, `${invalid} files`)
+  d.info(`${chalk.redBright('TOTAL ERR')}: %s`, `${errors} files`)
+
+  d.log('Template validation SUCCESS')
 }
 
 export const module = {

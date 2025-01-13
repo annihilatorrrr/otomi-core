@@ -27,23 +27,12 @@ resources:
         pilot:
           k8s:
             podAnnotations:
-              policy.otomi.io/ignore: psp-allowed-users
               sidecar.istio.io/inject: "true"
             priorityClassName: otomi-critical
             hpaSpec:
               minReplicas: {{ $i.autoscaling.pilot.minReplicas }}
               maxReplicas: {{ $i.autoscaling.pilot.maxReplicas }}
-            resources:
-              {{- with $i | get "resources.pilot" nil }}
-                {{- toYaml . | nindent 14 }}
-              {{- else }}
-              limits:
-                cpu: '2'
-                memory: 2Gi
-              requests:
-                cpu: 100m
-                memory: 128Mi
-              {{- end }}
+            resources: {{- $i.resources.pilot | toYaml | nindent 14 }}
         ingressGateways:
           - name: istio-ingressgateway
             enabled: false
@@ -53,20 +42,8 @@ resources:
               istio: ingressgateway-public
               app: ingressgateway
             k8s:
-              podAnnotations:
-                policy.otomi.io/ignore: psp-allowed-users
               priorityClassName: otomi-critical
-              resources:
-              {{- with $i | get "resources.ingressgateway" nil }}
-                {{- toYaml . | nindent 16 }}
-              {{- else }}
-                limits:
-                  cpu: '1'
-                  memory: 256Mi
-                requests:
-                  cpu: 100m
-                  memory: 128Mi
-              {{- end }}
+              resources: {{- $i.resources.ingressgateway | toYaml | nindent 16 }}
               hpaSpec:
                 minReplicas: {{ $i | get "autoscaling.ingressgateway.minReplicas" }}
                 maxReplicas: {{ $i | get "autoscaling.ingressgateway.maxReplicas" }}
@@ -83,29 +60,13 @@ resources:
                     name: https
                   - port: 15443
                     name: tls
-            {{- if eq $v.cluster.provider "azure" }}
-              readinessProbe:
-                failureThreshold: 20
-            {{- end }}
         {{ if $i.egressGateway.enabled }}
         egressGateways:
           - name: istio-egressgateway
             enabled: true
             k8s:
-              podAnnotations:
-                policy.otomi.io/ignore: psp-allowed-users
               priorityClassName: otomi-critical
-              resources:
-              {{- with $i | get "resources.egressgateway" nil }}
-                {{- toYaml . | nindent 16 }}
-              {{- else }}
-                limits:
-                  cpu: '1'
-                  memory: 256Mi
-                requests:
-                  cpu: 100m
-                  memory: 128Mi
-              {{- end }}
+              resources: {{- $i.resources.egressgateway | toYaml | nindent 16 }}
               hpaSpec:
                 minReplicas: {{ $i | get "autoscaling.egressgateway.minReplicas" }}
                 maxReplicas: {{ $i | get "autoscaling.egressgateway.maxReplicas" }}
@@ -120,10 +81,6 @@ resources:
                   - port: 443
                     targetPort: 8443
                     name: https
-            {{- if eq $v.cluster.provider "azure" }}
-              readinessProbe:
-                failureThreshold: 20
-            {{- end }}
         {{- end }}  
       values:
         cni:
@@ -137,32 +94,30 @@ resources:
           logging:
             level: {{ $ig | get "logging.level" "default:info" }}
           proxy:
-            resources:
-            {{- with $i | get "resources.proxy" nil }}
-              {{- toYaml . | nindent 14 }}
-            {{- else }}
-              limits:
-                cpu: '1'
-                memory: 1Gi
-              requests:
-                cpu: 20m
-                memory: 80Mi
-            {{- end }}
+            resources: {{- $i.resources.proxy | toYaml | nindent 14 }}
             autoInject: enabled
-          tracer:
-            zipkin:
-              address: jaeger-operator-jaeger-collector.jaeger:9411 
           useMCP: false
         meshConfig:
-          accessLogFile: "/dev/stdout"
           defaultConfig:
-          {{ with $i | get "meshConfig.defaultConfig" nil }}
-            {{- toYaml . | nindent 14 }}
-          {{- else }}
-            tracing:
-              sampling: 0.1
+            holdApplicationUntilProxyStarts: true
+            gatewayTopology:
+              numTrustedProxies: 1
+          accessLogFile: /dev/stdout
+          {{- if $i.tracing.enabled }}
+          accessLogFormat: |
+            [%START_TIME%] "%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% %PROTOCOL%" %RESPONSE_CODE% %RESPONSE_FLAGS% %RESPONSE_CODE_DETAILS% %CONNECTION_TERMINATION_DETAILS% "%UPSTREAM_TRANSPORT_FAILURE_REASON%" %BYTES_RECEIVED% %BYTES_SENT% %DURATION% %RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)% "%REQ(X-FORWARDED-FOR)%" "%REQ(USER-AGENT)%" "%REQ(X-REQUEST-ID)%" "%REQ(:AUTHORITY)%" "%UPSTREAM_HOST%" %UPSTREAM_CLUSTER% %UPSTREAM_LOCAL_ADDRESS% %DOWNSTREAM_LOCAL_ADDRESS% %DOWNSTREAM_REMOTE_ADDRESS% %REQUESTED_SERVER_NAME% %ROUTE_NAME% traceID=%REQ(TRACEPARENT)%
           {{- end }}
           enableAutoMtls: true
+          extensionProviders:
+          {{- if $i.tracing.enabled }}
+          - opentelemetry:
+              port: 4317
+              service: otel-collector-collector.otel.svc.cluster.local
+            name: otel-tracing
+          {{- end }}
+          {{- with $i | get "extensionProviders" nil }}
+          {{- toYaml .| nindent 10 }}
+          {{- end }}
         {{- if $v._derived.untrustedCA }}
         pilot:
           jwksResolverExtraRootCA: |
@@ -170,5 +125,3 @@ resources:
         {{- end }}
         sidecarInjectorWebhook:
           enableNamespacesByDefault: false
-          injectedAnnotations: 
-            policy.otomi.io/ignore.istio-init: psp-allowed-users,psp-capabilities

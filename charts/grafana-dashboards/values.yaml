@@ -1,14 +1,20 @@
 folders:
-  - azure
+  - argo
+  - cloudnative-pg
+  - falco
+  - falco-teams
   - istio-admin
-  - istio-teams
   - k8s-admin
   - k8s-teams
-  - shared
+  - minio
+  - thanos
+  - trivy
+  - trivy-teams
+  - velero
 
 sidecar:
   dashboards:
     label: grafana_dashboard
     labelValue: '1'
 
-team: admin    
+team: admin

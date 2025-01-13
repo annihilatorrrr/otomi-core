@@ -2,47 +2,34 @@ teamConfig:
     demo:
         services:
             - auth: true
-              domain: hello.team-demo.demo.eks.otomi.cloud
+              domain: hello-demo.dev.linode-apl.net
+              headers:
+                  response:
+                      set:
+                          - name: X-Frame-Options
+                            value: same-origin
+                          - name: sander
+                            value: same-origin
               id: cb5149c4-8ea5-4c5a-be04-a37258658bd3
               ksvc:
-                  image:
-                      repository: otomi/nodejs-helloworld
-                      tag: v1.2.12
-                  resources:
-                      limits:
-                          cpu: 50m
-                          memory: 64Mi
-                      requests:
-                          cpu: 50m
-                          memory: 64Mi
-                  scaleToZero: false
-                  secrets:
-                      - mysecret-generic
+                  predeployed: true
               name: hello
-              networkPolicy:
-                  ingressPrivate:
-                      mode: AllowAll
               ownHost: true
               port: 80
               type: public
-            - domain: tlspass.eks.dev.otomi.cloud
+              tlsPass: true
+              useCname: true
+              cname:
+                  domain: 'hello-demo.cname.com'
+                  tslSecretName: ''
+              trafficControl:
+                  enabled: true
+                  weightV1: 70
+                  weightV2: 30
+            - domain: tlspass.dev.linode-apl.net
               id: cb5149c4-8ea5-4c5a-be04-a37258658bd4
               ksvc:
-                  image:
-                      repository: otomi/nodejs-helloworld
-                      tag: v1.2.12
-                  resources:
-                      limits:
-                          cpu: 50m
-                          memory: 64Mi
-                      requests:
-                          cpu: 50m
-                          memory: 64Mi
-                  scaleToZero: false
-                  secrets:
-                      - mysecret-generic
-                  securityContext:
-                      runAsUser: 1002
+                  predeployed: true
               name: hello-auth
               ownHost: true
               paths: []
@@ -50,52 +37,13 @@ teamConfig:
               type: public
             - id: cb5149c4-8ea5-4c5a-be04-a37258658bd5
               ksvc:
-                  containerPort: 80
-                  files:
-                      /etc/nginx.conf: |
-                          events {
-                          }
-
-                          http {
-                            log_format main '$remote_addr - $remote_user [$time_local]  $status '
-                            '"$request" $body_bytes_sent "$http_referer" '
-                            '"$http_user_agent" "$http_x_forwarded_for"';
-                            access_log /var/log/nginx/access.log main;
-                            error_log  /var/log/nginx/error.log;
-
-                            server {
-                              listen 443 ssl;
-
-                              root /usr/share/nginx/html;
-                              index index.html;
-
-                              server_name tlspass.eks.dev.otomi.cloud;
-                              ssl_certificate /etc/nginx-server-certs/tls.crt;
-                              ssl_certificate_key /etc/nginx-server-certs/tls.key;
-                            }
-                          }
-                  image:
-                      repository: nginx
-                      tag: latest
-                  resources:
-                      limits:
-                          cpu: 50m
-                          memory: 64Mi
-                      requests:
-                          cpu: 50m
-                          memory: 64Mi
-                  scaleToZero: false
-                  secretMounts:
-                      /etc/nginx-server-certs: mysecret-tls
+                  predeployed: true
               name: tlspass
               port: 443
               tlsPass: true
               type: public
             - id: cb5149c4-8ea5-4c5a-be04-a37258658bd6
               name: some-svc
-              networkPolicy:
-                  ingressPrivate:
-                      mode: AllowAll
               port: 80
               type: cluster
             - hasCert: true
@@ -104,42 +52,43 @@ teamConfig:
                   - /jeho
               type: public
             - name: service-a
-              networkPolicy:
-                  egressPublic:
-                      - domain: domain1.com
-                        ports:
-                            - number: 8443
-                              protocol: TCP
-                      - domain: domain2.com
-                        ports:
-                            - number: 443
-                              protocol: HTTPS
-                      - domain: 185.199.110.153
-                        ports:
-                            - number: 443
-                              protocol: TCP
-                      - domain: ae::1
-                        ports:
-                            - number: 443
-                              protocol: TCP
-                  ingressPrivate:
-                      allow:
-                          - team: team1
-                          - service: service-x
-                            team: team2
-                      mode: AllowOnly
               type: cluster
             - name: service-b
-              networkPolicy:
-                  egressPublic: []
-                  ingressPrivate:
-                      mode: DenyAll
               type: cluster
             - name: service-d
-              networkPolicy:
-                  ingressPrivate:
-                      mode: AllowOnly
               type: cluster
             - ingressClassName: net-a
               name: service-e
               type: public
+              headers:
+                  response:
+                      set:
+                          - name: X-Frame-Options
+                            value: same-origin
+                          - name: sander
+                            value: same-origin
+                  request:
+                      set:
+                          - name: someheader
+                            value: somevalue
+              useCname: true
+              cname:
+                  domain: 'net-a-demo.cname.com'
+                  tslSecretName: ''
+              trafficControl:
+                  enabled: true
+                  weightV1: 50
+                  weightV2: 50
+            - ingressClassName: platform
+              ksvc:
+                  predeployed: false
+              name: hello-blue-green
+              ownHost: true
+              useCname: false
+              paths: []
+              port: 80
+              type: public
+              trafficControl:
+                  enabled: true
+                  weightV1: 90
+                  weightV2: 10
