@@ -44,3 +44,46 @@ operations:
             kubectl -n "team-$id" annotate podmonitor/$p --overwrite "meta.helm.sh/release-name"=team-ns-$id
           done
         done
+  - version: 0.18.0
+    post:
+      # convert secrets to new format and apply
+      - vendor/kes-to-eso/migrate-post.sh || true
+  - version: 0.18.1
+    pre:
+      - upgrades/pre/upgrade-0-18-1.sh || true
+  - version: 0.20.0
+    pre:
+      - upgrades/pre/upgrade-0-20-0.sh || true
+  - version: 0.22.0
+    pre:
+      - upgrades/pre/upgrade-0-22-0.sh || true
+  - version: 0.23.0
+    pre:
+      - upgrades/pre/upgrade-0-23-0.sh || true
+  - version: 0.25.0
+    pre:
+      - upgrades/pre/upgrade-0-25-0.sh || true
+  - version: 0.26.0
+    pre:
+      - upgrades/pre/upgrade-0-26.0.sh || true
+  - version: 0.27.0
+    pre:
+      - upgrades/pre/upgrade-0-27.0.sh || true
+  - version: 1.2.0
+    pre:
+      - upgrades/pre/upgrade-1-2.0.sh || true
+  - version: 2.7.0
+    pre:
+      - upgrades/pre/upgrade-2-7-0.sh || true
+  - version: 2.8.0
+    pre:
+      - upgrades/pre/upgrade-2-8-0.sh || true
+  - version: 2.10.0
+    pre:
+      - upgrades/pre/upgrade-2-10-0.sh || true
+  - version: 2.12.0
+    pre:
+      - upgrades/pre/upgrade-2-12-0.sh || true
+  - version: 3.0.0
+    pre:
+      - upgrades/pre/upgrade-3-0-0.sh || true

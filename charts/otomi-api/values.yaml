@@ -5,10 +5,9 @@
 priorityClassName: "otomi-critical"
 
 replicaCount: 1
-
 image:
   registry: docker.io
-  repository: otomi/api
+  repository: linode/apl-api
   tag: 0.1.1
   pullPolicy: IfNotPresent
 
@@ -17,10 +16,14 @@ fullnameOverride: ""
 
 serviceAccount:
   # Specifies whether a service account should be created
-  create: false
+  create: true
   # The name of the service account to use.
   # If not set and create is true, a name is generated using the fullname template
   name:
+  annotations: {}
+  labels: {}
+
+imagePullSecrets: {}
 
 rbac:
   # Specifies whether rbac should be set up
@@ -90,9 +93,8 @@ secrets:
 env:
   GIT_REPO_URL:
   GIT_BRANCH:
-  DISABLE_SYNC: false
-  GIT_LOCAL_PATH: /tmp/otomi-values
-  ENV_DIR: /tmp/otomi-values
+  ENV_DIR: /tmp/otomi/values/main
+  GIT_LOCAL_PATH: /tmp/otomi/values/main
   GOOGLE_APPLICATION_CREDENTIALS: '/tmp/key.json'
 
 core: {}
@@ -100,7 +102,7 @@ core: {}
 tools:
   image:
     registry: docker.io
-    repository: otomi/core
+    repository: linode/apl-core
     tag: latest
     pullPolicy: IfNotPresent
 
@@ -113,6 +115,7 @@ tools:
     #   memory: 100Mi
 
   secrets:
+    SOPS_AGE_KEY: ''
     GCLOUD_SERVICE_KEY: ''
     AZURE_TENANT_ID: ''
     AZURE_CLIENT_ID: ''

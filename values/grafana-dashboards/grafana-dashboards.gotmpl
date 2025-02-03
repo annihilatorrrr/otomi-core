@@ -1,9 +1,29 @@
 {{- $v := .Values }}
-{{- $c := $v.apps }}
 folders:
   - k8s-admin
   - istio-admin
-  {{- if and (eq $v.cluster.provider "azure") ($v | get "azure.monitor" nil) }}
-  - azure
+  - cloudnative-pg
+  {{- if $v.apps.falco.enabled }}
+  - falco
   {{- end }}
-  - shared
+  {{- if $v.apps.loki.enabled }}
+  - loki
+  {{- end }}
+  {{- if $v.apps.argocd.enabled }}
+  - argo
+  {{- end }}
+  {{- if $v.apps.velero.enabled }}
+  - velero
+  {{- end }}
+  {{- if $v.apps.minio.enabled }}
+  - minio
+  {{- end }}
+  {{- if $v.apps.trivy.enabled }}
+  - trivy
+  {{- end }}
+  {{- if $v.apps.tempo.enabled }}
+  - tempo
+  {{- end }}
+  {{- if $v.apps.thanos.enabled }}
+  - thanos
+  {{- end }}

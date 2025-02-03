@@ -1,0 +1,49 @@
+{{- $v := .Values }}
+{{- $hdb := $v.databases.harbor }}
+{{- $cnpg := $v.apps.cnpg }}
+{{- $obj := $v.obj.provider }}
+{{- $b := $v.platformBackups.database.harbor }}
+
+name: harbor-otomi-db
+storage:
+  size: {{ $hdb.size }}
+instances: {{ $hdb.replicas }}
+
+{{- with $hdb.imageName }}
+imageName: {{ . }}
+{{- end }}
+
+postgresql:
+  parameters:
+    max_connections: "32"
+    shared_buffers: 64MB
+    work_mem: 2MB
+
+{{- if eq $obj.type "minioLocal" "linode" }}
+{{- if $b.enabled }}
+backup:
+  enabled: {{ $b.enabled }}
+  schedule: {{ $b.schedule | quote }}
+  retentionPolicy: {{ $b.retentionPolicy }}
+  type:  {{ $obj.type }}
+{{- if eq $obj.type "minioLocal" }}
+  minioLocal:
+    destinationPath: "s3://cnpg/harbor"
+{{- end }}
+{{- if eq $obj.type "linode" }}
+  linode:
+    destinationPath: "s3://{{ $obj.linode.buckets.cnpg }}/harbor"
+    endpointURL: https://{{ $obj.linode.region }}.linodeobjects.com
+{{- end }}
+{{- end }}
+{{- end }}
+
+clusterSpec:
+  bootstrap:
+    initdb:
+      database: {{ $hdb.coreDatabase }}
+      owner: harbor
+      localeCollate: 'en_US.UTF-8'
+      localeCType: 'en_US.UTF-8'
+
+resources: {{- toYaml $hdb.resources | nindent 2 }}

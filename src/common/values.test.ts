@@ -1,13 +1,14 @@
-import { cloneDeep, merge } from 'lodash'
-import stubs from '../test-stubs'
-import { generateSecrets } from './values'
+import { cloneDeep, merge, set } from 'lodash'
+import { generateSecrets } from 'src/common/values'
+import stubs from 'src/test-stubs'
 
 const { terminal } = stubs
 
 describe('generateSecrets', () => {
   const values = { one: 'val', secret: 'prop', apps: { yo: { di: { lo: 'loves you' } } } }
-  const simpleTemplate = '"dummy"'
-  const twoStageTemplate = '.dot.templatedSecret | upper'
+  set(values, 'apps.harbor.registry.credentials.username', 'u')
+  set(values, 'apps.harbor.registry.credentials.password', 'p')
+  const simpleTemplate = 'dummy'
   const schema = {
     properties: {
       one: {
@@ -30,7 +31,7 @@ describe('generateSecrets', () => {
               },
               mama: {
                 type: 'string',
-                'x-secret': 'printf "%s!" .v.di.lo',
+                'x-secret': '{{ printf "%s!" "loves you" }}',
               },
             },
           },
@@ -44,7 +45,7 @@ describe('generateSecrets', () => {
           },
           twoStage: {
             type: 'string',
-            'x-secret': twoStageTemplate,
+            'x-secret': '',
           },
         },
       },
@@ -52,7 +53,7 @@ describe('generateSecrets', () => {
   }
   const expected = {
     secret: 'prop',
-    nested: { templatedSecret: 'dummy', twoStage: 'DUMMY' },
+    nested: { templatedSecret: 'dummy' },
     apps: { yo: { mama: 'loves you!' } },
   }
   let deps
@@ -63,11 +64,13 @@ describe('generateSecrets', () => {
     }
   })
   it('should generate new secrets and return only secrets', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     const res = await generateSecrets(values, deps)
     expect(res).toEqual(expected)
   })
   it('should not overwrite old secrets', async () => {
     const valuesWithExisting = merge(cloneDeep(values), { nested: { twoStage: 'exists' } })
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     const res = await generateSecrets(valuesWithExisting, deps)
     expect(res.nested.twoStage).toBe('exists')
   })

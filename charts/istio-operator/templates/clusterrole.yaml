@@ -35,6 +35,18 @@ rules:
   - '*'
   verbs:
   - '*'
+- apiGroups:
+  - telemetry.istio.io
+  resources:
+  - '*'
+  verbs:
+  - '*'
+- apiGroups:
+  - extensions.istio.io
+  resources:
+  - '*'
+  verbs:
+  - '*'
 # k8s groups
 - apiGroups:
   - admissionregistration.k8s.io
@@ -57,9 +69,7 @@ rules:
   - daemonsets
   - deployments
   - deployments/finalizers
-  - ingresses
   - replicasets
-  - statefulsets
   verbs:
   - '*'
 - apiGroups:
@@ -108,10 +118,12 @@ rules:
   - namespaces
   - pods
   - pods/proxy
+  - pods/portforward
   - persistentvolumeclaims
   - secrets
   - services
   - serviceaccounts
+  - resourcequotas
   verbs:
   - '*'
 ---

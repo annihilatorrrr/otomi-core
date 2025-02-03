@@ -1,51 +1,54 @@
 import { config } from 'dotenv'
-import { bool, cleanEnv, json, makeValidator, num, str } from 'envalid'
+import { CleanOptions, ValidatorSpec, bool, cleanEnv as clean, json, makeValidator, num, str } from 'envalid'
 import { existsSync } from 'fs'
 
-const ciBool = makeValidator((x) => {
+const ciBool = makeValidator<boolean | undefined>((x) => {
   if (x === 'vscode-jest-tests') return true
   if (x === undefined) return undefined
   const { _parse } = bool({ default: false })
   return _parse(x)
 })
 
-const cliEnvSpec = {
+export const cliEnvSpec = {
   CI: ciBool({ default: false }),
-  DISABLE_SYNC: bool({ default: false }),
+  DISABLE_SYNC: bool({ default: false, desc: 'will disable contacting the cluster as found in kube context' }),
   ENV_DIR: str({ default: `${process.cwd()}/env` }),
+  SOPS_AGE_KEY: str({ default: '' }),
   GCLOUD_SERVICE_KEY: json({ default: undefined }),
   IN_DOCKER: bool({ default: false }),
   KUBE_VERSION_OVERRIDE: str({ default: undefined }),
   NODE_TLS_REJECT_UNAUTHORIZED: bool({ default: true }),
   OTOMI_DEV: bool({ default: false }),
+  OTOMI_CHARTS_URL: str({
+    default: 'https://github.com/linode/apl-charts.git',
+    desc: 'The apl-charts repository url to clone into Gitea',
+  }),
   OTOMI_IN_TERMINAL: bool({ default: true }),
   STATIC_COLORS: bool({ default: false }),
-  TESTING: bool({ default: false }),
   TRACE: bool({ default: false }),
   VERBOSITY: num({ desc: 'The verbosity level', default: 1 }),
   VALUES_INPUT: str({ desc: 'The chart values.yaml file', default: undefined }),
+  RETRIES: num({ desc: 'The maximum amount of times to retry the operation by the reconciler', default: 30 }),
+  RANDOM: bool({ desc: 'Randomizes the timeouts by multiplying with a factor between 1 to 2', default: false }),
+  MIN_TIMEOUT: num({ desc: 'The number of milliseconds before starting the first retry', default: 60000 }),
+  FACTOR: num({ desc: 'The factor to multiply the timeout with', default: 1 }),
 }
 
-export const cleanEnvironment = (spec: Record<string, any> = cliEnvSpec): Record<string, any> => {
+export function cleanEnv<T>(spec: { [K in keyof T]: ValidatorSpec<T[K]> }, options?: CleanOptions<T>) {
   let pEnv: any = process.env
-  // load local .env if we have it, for devs
-  let path = `${process.cwd()}/.env`
-  if (!process.env.TESTING && existsSync(path)) {
-    const result = config({ path })
-    if (result.error) console.error(result.error)
-    pEnv = { ...result.parsed, ...pEnv }
-  }
-  path = `${pEnv.ENV_DIR}/.secrets`
-  if (existsSync(path)) {
-    const result = config({ path })
-    if (result.error) console.error(result.error)
-    pEnv = { ...result.parsed, ...pEnv }
-  }
-  return cleanEnv(pEnv, spec)
+  // load local .env and $ENV_DIR/.secrets if we have it
+  ;[`${process.cwd()}/.env`, `${pEnv.ENV_DIR}/.secrets`].forEach((path) => {
+    if (existsSync(path)) {
+      const result = config({ path })
+      if (result.error) console.error(result.error)
+      pEnv = { ...result.parsed, ...pEnv }
+    }
+  })
+  return clean(pEnv, spec, options)
 }
 
-export const env = cleanEnvironment()
+export const env = cleanEnv(cliEnvSpec, {})
 
 export const isChart = !!env.VALUES_INPUT
-export const isCi: boolean = env.CI
-export const isCli: boolean = !env.CI && !isChart
+export const isCi = env.CI
+export const isCli = env.OTOMI_DEV || (!env.CI && !isChart)

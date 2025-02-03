@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1.6
+# The above is needed for the "--checksum" aurgument to work in the ADD instruction
+
+# Using ubuntu:noble base image
+FROM ubuntu:jammy
+
+# Installing curl, vim, wget, tmux ttyd and bash-completion
+RUN apt update && apt upgrade -y && apt install -y ttyd jq curl vim wget less tmux bash-completion 
+
+# Installing yq
+ADD --chmod=755 --checksum=sha256:638c4b251c49201fc94b598834b715f8f1c6e9b1854d2820772d2c79f0289002 https://github.com/mikefarah/yq/releases/download/v4.44.5/yq_linux_amd64 /usr/local/bin/yq
+
+# Installing kubectl
+ADD --checksum=sha256:399e9d1995da80b64d2ef3606c1a239018660d8b35209fba3f7b0bc11c631c68 https://dl.k8s.io/release/v1.31.2/bin/linux/amd64/kubectl /tmp/kubectl
+RUN install -o root -g root -m 0755 /tmp/kubectl /usr/local/bin/kubectl && rm /tmp/kubectl
+
+# Installing k9s
+ADD --checksum=sha256:03934727bfbf39b1e61a74d8e045796cda2de14f8ce4c01df27f43d4494021de https://github.com/derailed/k9s/releases/download/v0.32.7/k9s_Linux_amd64.tar.gz /tmp/
+RUN tar zxf /tmp/k9s_Linux_amd64.tar.gz -C /usr/local/bin/ k9s && rm /tmp/k9s_Linux_amd64.tar.gz
+
+# Installing helm
+ADD --checksum=sha256:f5355c79190951eed23c5432a3b920e071f4c00a64f75e077de0dd4cb7b294ea https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz /tmp/
+RUN tar zxvf /tmp/helm-v3.16.3-linux-amd64.tar.gz linux-amd64/helm -O > /usr/local/bin/helm && chmod +x /usr/local/bin/helm && rm /tmp/helm-v3.16.3-linux-amd64.tar.gz
+
+# Installing velero cli
+ADD --checksum=sha256:9b066714cdb874fe34ec123645385d6f8c40c43308bbedf11d3265a7af17fda6 https://github.com/vmware-tanzu/velero/releases/download/v1.14.0/velero-v1.14.0-linux-amd64.tar.gz /tmp/
+RUN tar zxvf /tmp/velero-v1.14.0-linux-amd64.tar.gz velero-v1.14.0-linux-amd64/velero -O > /usr/local/bin/velero && chmod +x /usr/local/bin/velero && rm /tmp/velero-v1.14.0-linux-amd64.tar.gz
+
+# Installing tekton cli
+ADD --checksum=sha256:75830656f99a08bb86b421b6ff8db50b5ecf3ed2735f2fc4f665b941a43aa18b https://github.com/tektoncd/cli/releases/download/v0.38.1/tkn_0.38.1_Linux_x86_64.tar.gz /tmp/
+RUN tar zxvf /tmp/tkn_0.38.1_Linux_x86_64.tar.gz -C /usr/local/bin/ tkn && rm /tmp/tkn_0.38.1_Linux_x86_64.tar.gz
+
+# Installing kubectl-cnpg
+ADD --checksum=sha256:84a0d832d551f943bb0d9c93ec1ae257aa7de5ae039935c54bc3d5be09a4de34 https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.24.1/kubectl-cnpg_1.24.1_linux_x86_64.deb /tmp/
+RUN dpkg -i /tmp/kubectl-cnpg_1.24.1_linux_x86_64.deb && rm /tmp/kubectl-cnpg_1.24.1_linux_x86_64.deb
+
+# Creating user named user
+RUN addgroup --gid 1000 user && adduser --uid 1000 --gid 1000 --disabled-password --gecos "" user
+
+# Switching to user user
+USER user
+
+# Setting up kubectl autocompletion
+RUN touch ~/.bashrc && echo 'source <(kubectl completion bash)' >> ~/.bashrc && echo 'alias k=kubectl' >> ~/.bashrc && echo 'complete -o default -F __start_kubectl k' >>~/.bashrc && mkdir ~/.kube
+
+# Setting the working directory
+WORKDIR /home/user
+
+# Command to start a tmux session and expose it via ttyd.
+CMD ["ttyd", "-p", "8080", "tmux", "new", "-A"]

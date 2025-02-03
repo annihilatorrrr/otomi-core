@@ -1,8 +1,6 @@
 # All apps enabled
 cluster:
-  k8sVersion: 'K8S_VERSION_PLACEHOLDER'
-  name: 'dev'
-  provider: digitalocean
+  name: CLUSTER_NAME_PLACEHOLDER
   k8sContext: CONTEXT_PLACEHOLDER
 otomi:
   isMultitenant: true
@@ -11,14 +9,8 @@ otomi:
 apps:
   alertmanager:
     enabled: true
-  argocd:
-    enabled: true
   cert-manager:
     issuer: custom-ca
-
-  gatekeeper:
-    enabled: true
-    disableValidatingWebhook: false
   grafana:
     enabled: true
   harbor:
@@ -32,31 +24,29 @@ apps:
   kiali:
     enabled: true
   knative:
-    enabled: true
-  kube-descheduler:
-    enabled: true
-  kubeapps:
-    enabled: true
-  kubeclarity:
-    enabled: true
+    enabled: false
   kured:
     enabled: true
   loki:
     enabled: true
-  metrics-server:
+  minio:
+    enabled: true
+  otel:
     enabled: true
   prometheus:
     enabled: true
   promtail:
     enabled: true
   redis-shared:
+    enabled: false
+  rabbitmq:
     enabled: true
-  snapshot-controller:
+  tempo:
     enabled: true
-  tigera-operator:
+  trivy:
     enabled: true
-  vault:
-    enabled: true
+  velero:
+    enabled: false
 teamConfig:
   demo:
     password: somesecretvalue
@@ -64,6 +54,9 @@ teamConfig:
     networkPolicy:
       egressPublic: true
       ingressPrivate: true
+    selfService:
+      service:
+        - ingress
     services:
       - id: cb5149c4-8ea5-4c5a-be04-a37258658bd3
         ksvc:
@@ -83,9 +76,6 @@ teamConfig:
           securityContext:
             runAsUser: 1002
         name: hello
-        networkPolicy:
-          ingressPrivate:
-            mode: AllowAll
         ownHost: true
         paths: []
         port: 80

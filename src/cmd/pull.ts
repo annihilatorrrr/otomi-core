@@ -1,11 +1,11 @@
+import { prepareEnvironment, scriptName } from 'src/common/cli'
+import { terminal } from 'src/common/debug'
+import { env } from 'src/common/envalid'
+import { hfValues } from 'src/common/hf'
+import { getFilename } from 'src/common/utils'
+import { HelmArguments, setParsedArgs } from 'src/common/yargs'
 import { Argv } from 'yargs'
 import { $, cd } from 'zx'
-import { prepareEnvironment, scriptName } from '../common/cli'
-import { terminal } from '../common/debug'
-import { env } from '../common/envalid'
-import { hfValues } from '../common/hf'
-import { getFilename } from '../common/utils'
-import { HelmArguments, setParsedArgs } from '../common/yargs'
 
 const cmdName = getFilename(__filename)
 
@@ -17,7 +17,7 @@ export const pull = async (): Promise<void> => {
   cd(env.ENV_DIR)
   try {
     await $`git fetch`
-    await $`if git log; then git merge origin/${branch}; fi`
+    await $`if git --no-pager log --decorate=short --pretty=oneline -n1; then git merge origin/${branch}; fi`
   } catch (error) {
     d.warn(
       `An error occured when trying to pull (maybe not problematic).\nIf you see merge conflicts then please resolve these and run \`otomi commit\` again.`,

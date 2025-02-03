@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Derived from https://github.com/instrumenta/openapi2jsonschema
 import yaml
@@ -116,6 +116,8 @@ for crdFile in sys.argv[1:]:
         f = open(crdFile)
     with f:
         for y in yaml.load_all(f, Loader=yaml.SafeLoader):
+            if hasattr(y, '__iter__') == False:
+                continue
             if "kind" not in y:
                 continue
             if y["kind"] != "CustomResourceDefinition":

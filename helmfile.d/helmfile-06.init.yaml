@@ -12,11 +12,11 @@ bases:
 {{- $a := $v.apps }}
 
 releases:
-  - name: argocd-operator-cr
-    installed: {{ $a | get "argocd.enabled" }}
-    namespace: argocd
+  - name: keycloak-operator-cr
+    installed: true
+    namespace: keycloak
     labels:
-      pkg: argocd
+      pkg: keycloak
     <<: *rawCR
   - name: cert-manager
     installed: true
@@ -29,17 +29,10 @@ releases:
     namespace: istio-operator
     labels:
       pkg: istio
+      app: core
     chart: ../charts/raw
     values:
       - ../values/istio-operator/istio-operator-raw.gotmpl
       - snippets/common.gotmpl
-  - name: external-secrets
-    installed: {{ $a | get "vault.enabled" }}
-    namespace: vault
-    labels:
-      pkg: vault
-    chart: ../charts/kubernetes-external-secrets
-    values:
-      - ../values/external-secrets/external-secrets.gotmpl
-      - snippets/common.gotmpl
-    <<: *upgrade
+
+

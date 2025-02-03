@@ -1,0 +1,124 @@
+{{- $v := .Values }}
+{{- $o := $v.apps.otel }}
+resources:
+  - apiVersion: opentelemetry.io/v1alpha1
+    kind: OpenTelemetryCollector
+    metadata:
+      name: otel-collector
+    spec:
+      config: |
+        receivers:
+          otlp:
+            protocols:
+              grpc:
+              http:
+        processors:
+          memory_limiter:
+            check_interval: 1s
+            limit_percentage: 75
+            spike_limit_percentage: 15
+          batch:
+            send_batch_size: 10000
+            timeout: 10s
+          k8sattributes:
+            auth_type: "serviceAccount"
+            passthrough: false
+            extract:
+              {{- with $o.collector.attributes }}
+              metadata:
+              {{ . | toYaml | nindent 16 }}
+              {{- end }}
+        exporters:
+          logging:
+            loglevel: info
+          {{- if $v.apps.tempo.enabled }}
+          otlp:
+            endpoint: tempo-distributor.tempo.svc.cluster.local:4317
+            sending_queue:
+              enabled: true
+              num_consumers: 100
+              queue_size: 10000
+            retry_on_failure:
+              enabled: true
+            tls:
+              insecure: true
+          {{- end }}
+          {{- if $v.apps.jaeger.enabled }}
+          jaeger:
+            endpoint: jaeger-operator-jaeger-collector.jaeger.svc:14250
+            tls:
+              insecure: true
+          {{- end }}
+        service:
+          pipelines:
+            logs:
+              receivers:
+              - otlp
+              processors:
+              - batch
+              exporters:
+              - logging
+            traces:
+              receivers:
+              - otlp
+              processors:
+              - memory_limiter
+              - batch
+              - k8sattributes
+              exporters:
+              - logging
+              {{- if $v.apps.tempo.enabled }}
+              - otlp
+              {{- end }}
+              {{- if $v.apps.jaeger.enabled }}
+              - jaeger
+              {{- end }}
+      mode: {{ $o.collector.mode }}
+      autoscaler:
+        minReplicas: {{ $o.collector.autoscaler.minReplicas }}
+        maxReplicas: {{ $o.collector.autoscaler.maxReplicas }}
+        targetCPUUtilization: {{ $o.collector.autoscaler.targetCPUUtilizationPercentage }}
+        targetMemoryUtilization: {{ $o.collector.autoscaler.targetMemoryUtilizationPercentage }}
+      resources: {{- $o.resources.collector | toYaml | nindent 8 }}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: otel-collector
+    rules:
+      - apiGroups:
+          - ''
+        resources:
+          - 'pods'
+          - 'namespaces'
+        verbs:
+          - 'get'
+          - 'watch'
+          - 'list'
+      - apiGroups:
+          - 'apps'
+        resources:
+          - 'replicasets'
+        verbs:
+          - 'get'
+          - 'list'
+          - 'watch'
+      - apiGroups:
+          - 'extensions'
+        resources:
+          - 'replicasets'
+        verbs:
+          - 'get'
+          - 'list'
+          - 'watch'
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: otel-collector
+    subjects:
+      - kind: ServiceAccount
+        name: otel-collector-collector
+        namespace: otel
+    roleRef:
+      kind: ClusterRole
+      name: otel-collector
+      apiGroup: rbac.authorization.k8s.io

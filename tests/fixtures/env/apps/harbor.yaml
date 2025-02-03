@@ -1,9 +1,7 @@
 apps:
     harbor:
+        core: {}
         enabled: true
-        persistence:
-            imageChartStorage:
-                gcs:
-                    bucket: otomi-harbor
-                    rootdirectory: /google/demo
-                type: gcs
+        jobservice: {}
+        registry:
+            credentials: {}
