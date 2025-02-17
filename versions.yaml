@@ -1,4 +1,5 @@
-api: 0.5.15
-console: 0.5.18
-tasks: 0.2.31
-tools: 1.4.25
+api: 3.6.1
+console: 3.5.1
+consoleLogin: v3.5.0
+tasks: 3.6.1
+tools: 2.8.7

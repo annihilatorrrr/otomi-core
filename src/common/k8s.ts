@@ -1,17 +1,19 @@
 /* eslint-disable no-loop-func */
 /* eslint-disable no-await-in-loop */
+import { AppsV1Api, CoreV1Api, CustomObjectsApi, KubeConfig, V1Secret } from '@kubernetes/client-node'
+import { V1ResourceRequirements } from '@kubernetes/client-node/dist/gen/model/v1ResourceRequirements'
 import retry, { Options } from 'async-retry'
 import { AnyAaaaRecord, AnyARecord } from 'dns'
 import { resolveAny } from 'dns/promises'
 import { access, mkdir, writeFile } from 'fs/promises'
 import { Agent } from 'https'
-import { dump, load } from 'js-yaml'
-import { isEmpty, map } from 'lodash'
+import { isEmpty, isEqual, map, mapValues } from 'lodash'
 import fetch, { RequestInit } from 'node-fetch'
 import { dirname, join } from 'path'
-import { $, nothrow, sleep } from 'zx'
+import { parse, stringify } from 'yaml'
+import { $, cd, sleep } from 'zx'
 import { DEPLOYMENT_PASSWORDS_SECRET, DEPLOYMENT_STATUS_CONFIGMAP } from './constants'
-import { terminal } from './debug'
+import { OtomiDebugger, terminal } from './debug'
 import { env } from './envalid'
 import { hfValues } from './hf'
 import { parser } from './yargs'
@@ -19,13 +21,42 @@ import { askYesNo } from './zx-enhance'
 
 export const secretId = `secret/otomi/${DEPLOYMENT_PASSWORDS_SECRET}`
 
+// Warning don't use this with asynchronous code and multiple kubeconfigs it will override the kubeconfig
+let kc: KubeConfig
+let coreClient: CoreV1Api
+let appClient: AppsV1Api
+let customClient: CustomObjectsApi
+export const k8s = {
+  kc: (): KubeConfig => {
+    if (kc) return kc
+    kc = new KubeConfig()
+    kc.loadFromDefault()
+    return kc
+  },
+  core: (): CoreV1Api => {
+    if (coreClient) return coreClient
+    coreClient = k8s.kc().makeApiClient(CoreV1Api)
+    return coreClient
+  },
+  app: (): AppsV1Api => {
+    if (appClient) return appClient
+    appClient = k8s.kc().makeApiClient(AppsV1Api)
+    return appClient
+  },
+  custom: (): CustomObjectsApi => {
+    if (customClient) return customClient
+    customClient = k8s.kc().makeApiClient(CustomObjectsApi)
+    return customClient
+  },
+}
+
 export const createK8sSecret = async (
   name: string,
   namespace: string,
   data: Record<string, any> | string,
 ): Promise<void> => {
   const d = terminal('common:k8s:createK8sSecret')
-  const rawString = dump(data)
+  const rawString = stringify(data)
   const filePath = join('/tmp', secretId)
   const dirPath = dirname(filePath)
   try {
@@ -35,18 +66,28 @@ export const createK8sSecret = async (
   }
 
   await writeFile(filePath, rawString)
-  const result = await nothrow(
-    $`kubectl create secret generic ${name} -n ${namespace} --from-file ${filePath} --dry-run=client -o yaml | kubectl apply -f -`,
-  )
+  const result =
+    await $`kubectl create secret generic ${name} -n ${namespace} --from-file ${filePath} --dry-run=client -o yaml | kubectl apply -f -`
+      .nothrow()
+      .quiet()
   if (result.stderr) d.error(result.stderr)
   d.debug(`kubectl create secret output: \n ${result.stdout}`)
 }
 
+export const isResourcePresent = async (type: string, name: string, namespace: string): Promise<boolean> => {
+  try {
+    await $`kubectl get -n ${namespace} ${type} ${name}`
+  } catch {
+    return false
+  }
+  return true
+}
+
 export const getK8sSecret = async (name: string, namespace: string): Promise<Record<string, any> | undefined> => {
-  const result = await nothrow(
-    $`kubectl get secret ${name} -n ${namespace} -ojsonpath='{.data.${name}}' | base64 --decode`,
-  )
-  if (result.exitCode === 0) return load(result.stdout) as Record<string, any>
+  const result = await $`kubectl get secret ${name} -n ${namespace} -ojsonpath='{.data.${name}}' | base64 --decode`
+    .nothrow()
+    .quiet()
+  if (result.exitCode === 0) return parse(result.stdout) as Record<string, any>
   return undefined
 }
 
@@ -59,13 +100,24 @@ export interface DeploymentState {
 }
 
 export const getDeploymentState = async (): Promise<DeploymentState> => {
-  if (env.DISABLE_SYNC) return {}
-  const result = await nothrow($`kubectl get cm -n otomi ${DEPLOYMENT_STATUS_CONFIGMAP} -o jsonpath='{.data}'`)
+  if (env.isDev && env.DISABLE_SYNC) return {}
+  const result = await $`kubectl get cm -n otomi ${DEPLOYMENT_STATUS_CONFIGMAP} -o jsonpath='{.data}'`.nothrow().quiet()
   return JSON.parse(result.stdout || '{}')
 }
 
+export const getHelmReleases = async (): Promise<Record<string, any>> => {
+  const result = await $`helm list -A -a -o json`.nothrow().quiet()
+  const data = JSON.parse(result.stdout || '[]') as []
+  const status = data.reduce((acc, item) => {
+    // eslint-disable-next-line no-param-reassign
+    acc[`${item['namespace']}/${item['name']}`] = item
+    return acc
+  }, {})
+  return status
+}
+
 export const setDeploymentState = async (state: Record<string, any>): Promise<void> => {
-  if (env.DISABLE_SYNC) return
+  if (env.isDev && env.DISABLE_SYNC) return
   const d = terminal('common:k8s:setDeploymentState')
   const currentState = await getDeploymentState()
   const newState = { ...currentState, ...state }
@@ -74,7 +126,7 @@ export const setDeploymentState = async (state: Record<string, any>): Promise<vo
   const cmdPatch = `kubectl -n otomi patch cm ${DEPLOYMENT_STATUS_CONFIGMAP} --type merge -p {"data":${JSON.stringify(
     newState,
   )}}`
-  const res = await nothrow($`${cmdPatch.split(' ')} || ${cmdCreate.split(' ')}`)
+  const res = await $`${cmdPatch.split(' ')} || ${cmdCreate.split(' ')}`.nothrow().quiet()
   if (res.stderr) d.error(res.stderr)
 }
 
@@ -114,7 +166,7 @@ export const getOtomiLoadBalancerIP = async (): Promise<string> => {
   /* A load balancer can have a hostname, ip or any list of those items. We select the first item, as we only need one.
    * And we prefer IP over hostname, as it reduces the fact that we need to resolve & select an ip.
    */
-  const firstIngressData = ingressDataListSorted[0]
+  const [firstIngressData] = ingressDataListSorted
 
   if (firstIngressData.ip) return firstIngressData.ip
   if (firstIngressData.hostname) {
@@ -189,6 +241,24 @@ type WaitTillAvailableOptions = Options & {
   password?: string
 }
 
+export const waitTillGitRepoAvailable = async (repoUrl): Promise<void> => {
+  const retryOptions: Options = {
+    retries: 20,
+    maxTimeout: 30000,
+  }
+  const d = terminal('common:k8s:waitTillGitRepoAvailable')
+  await retry(async (bail) => {
+    try {
+      cd(env.ENV_DIR)
+      // the ls-remote exist with zero even if repo is empty
+      await $`git ls-remote ${repoUrl}`
+    } catch (e) {
+      d.warn(`The values repository is not yet reachable. Retrying in ${retryOptions.maxTimeout} ms`)
+      throw e
+    }
+  }, retryOptions)
+}
+
 export const waitTillAvailable = async (url: string, opts?: WaitTillAvailableOptions): Promise<void> => {
   const options = { status: 200, skipSsl: false, ...opts }
   const d = terminal('common:k8s:waitTillAvailable')
@@ -227,4 +297,165 @@ export const waitTillAvailable = async (url: string, opts?: WaitTillAvailableOpt
       throw e
     }
   }, retryOptions)
+}
+
+export async function createGenericSecret(
+  coreV1Api: CoreV1Api,
+  name: string,
+  namespace: string,
+  secretData: Record<string, string>,
+): Promise<V1Secret> {
+  const encodedData = mapValues(secretData, b64enc)
+
+  const secret: V1Secret = {
+    metadata: {
+      name,
+      namespace,
+    },
+    data: encodedData,
+    type: 'Opaque',
+  }
+
+  const response = await coreV1Api.createNamespacedSecret(namespace, secret)
+  return response.body
+}
+
+export function b64enc(value: string): string {
+  return Buffer.from(value).toString('base64')
+}
+
+export async function getPodsOfStatefulSet(
+  appsApi: AppsV1Api,
+  statefulSetName: string,
+  namespace: string,
+  coreApi: CoreV1Api,
+) {
+  const { body: statefulSet } = await appsApi.readNamespacedStatefulSet(statefulSetName, namespace)
+
+  if (!statefulSet.spec?.selector?.matchLabels) {
+    throw new Error(`StatefulSet ${statefulSetName} does not have matchLabels`)
+  }
+
+  const labelSelector = Object.entries(statefulSet.spec.selector.matchLabels)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(',')
+
+  const { body: podList } = await coreApi.listNamespacedPod(
+    namespace,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    labelSelector,
+  )
+  return podList
+}
+
+export async function patchContainerResourcesOfSts(
+  statefulSetName: string,
+  namespace: string,
+  containerName: string,
+  desiredResources: V1ResourceRequirements,
+  appsApi: AppsV1Api,
+  coreApi: CoreV1Api,
+  d: OtomiDebugger,
+) {
+  try {
+    const pods = await getPodsOfStatefulSet(appsApi, statefulSetName, namespace, coreApi)
+
+    if (pods.items.length === 0) {
+      d.error(`No pods found for StatefulSet ${statefulSetName}`)
+      throw new Error(`No pods found for StatefulSet ${statefulSetName}`)
+    }
+
+    for (const pod of pods.items) {
+      const actualResources = pod.spec?.containers?.find((container) => container.name === containerName)?.resources
+
+      if (
+        isEqual(actualResources?.limits, desiredResources?.limits) &&
+        isEqual(actualResources?.requests, desiredResources?.requests)
+      ) {
+        d.info(
+          `sts/argocd-application-controller pod has desired resources: ${JSON.stringify(
+            desiredResources,
+          )} and actual resources: ${JSON.stringify(actualResources)}`,
+        )
+        return
+      }
+
+      await patchStatefulSetResources(statefulSetName, containerName, namespace, desiredResources, appsApi, d)
+      d.info(`sts/argocd-application-controller has been patched with resources: ${JSON.stringify(desiredResources)}`)
+
+      await deleteStatefulSetPods(statefulSetName, namespace, appsApi, coreApi, d)
+      d.info(`sts/argocd-application-controller pods restarted`)
+    }
+  } catch (error) {
+    d.error(`Error patching StatefulSet ${statefulSetName}:`, error)
+  }
+}
+
+export async function patchStatefulSetResources(
+  statefulSetName: string,
+  containerName: string,
+  namespace: string,
+  resources: V1ResourceRequirements,
+  appsApi: AppsV1Api,
+  d: OtomiDebugger,
+) {
+  try {
+    const patch = {
+      spec: {
+        template: {
+          spec: {
+            containers: [
+              {
+                name: containerName,
+                resources,
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    await appsApi.patchNamespacedStatefulSet(
+      statefulSetName,
+      namespace,
+      patch,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { headers: { 'Content-Type': 'application/strategic-merge-patch+json' } },
+    )
+  } catch (error) {
+    d.error(`Failed to patch StatefulSet ${statefulSetName}:`, error)
+  }
+}
+
+export async function deleteStatefulSetPods(
+  statefulSetName: string,
+  namespace: string,
+  appsApi: AppsV1Api,
+  coreApi: CoreV1Api,
+  d: OtomiDebugger,
+) {
+  try {
+    const pods = await getPodsOfStatefulSet(appsApi, statefulSetName, namespace, coreApi)
+
+    if (pods.items.length === 0) {
+      d.error(`No pods found for StatefulSet ${statefulSetName}`)
+      throw new Error(`No pods found for StatefulSet ${statefulSetName}`)
+    }
+
+    // Delete each pod
+    for (const pod of pods.items) {
+      if (pod.metadata?.name) {
+        await coreApi.deleteNamespacedPod(pod.metadata.name, namespace)
+      }
+    }
+  } catch (error) {
+    d.error(`Failed to delete pods for StatefulSet ${statefulSetName}:`, error)
+  }
 }

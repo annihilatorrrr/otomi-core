@@ -8,7 +8,7 @@ shopt -s expand_aliases
 ENV_DIR=${ENV_DIR:-$PWD}
 [ "$ENV_DIR" = '/home/app/stack' ] && ENV_DIR='/home/app/stack/env'
 [ -d $ENV_DIR/env/env ] && ENV_DIR=$ENV_DIR/env
-if [ -n "$TESTING" ]; then
+if [ "$NODE_ENV" == "test" ]; then
   CI=1
   ENV_DIR="$PWD/tests/fixtures"
 fi
@@ -18,7 +18,7 @@ LOG_LEVEL='--log-level warn'
 
 # Common vars
 readonly otomi_settings="$ENV_DIR/env/settings.yaml"
-readonly otomi_tools_image="otomi/core:latest"
+readonly otomi_tools_image="linode/apl-core:latest"
 [ $(uname -s) == 'Linux' ] && readonly LINUX_WORKAROUND='--user=root:root'
 
 # Mutliple files vars
@@ -106,11 +106,10 @@ fi
 function _rind() {
   local cmd="$1"
   shift
-  if [ $has_docker = 'true' ] && [ -z "$IN_DOCKER" ]; then
+  if [ $has_docker = 'true' ] && [ "${IN_DOCKER,,}" == "true" ]; then
     docker run --rm \
       $LINUX_WORKAROUND \
       -v $ENV_DIR:$ENV_DIR \
-      -e IN_DOCKER='1' \
       -e ENV_DIR=$ENV_DIR \
       $otomi_tools_image $cmd "$@"
     return $?
@@ -133,7 +132,7 @@ function yq() {
 
 function yqr() {
   local all_values=$(hf_values)
-  local ret=$(echo "$all_values" | yq r - "$@")
+  local ret=$(echo "$all_values" | yq "$@" -)
   [ -z "$ret" ] && return 1
   echo $ret
 }
@@ -149,14 +148,14 @@ function get_k8s_version() {
 
 function otomi_image_tag() {
   local otomi_version=$OTOMI_VERSION
-  [ -z "$otomi_version" ] && [ -f $otomi_settings ] && otomi_version=$(yq r $otomi_settings otomi.version)
+  [ -z "$otomi_version" ] && [ -f $otomi_settings ] && otomi_version=$(yq '.otomi.version' $otomi_settings)
   [ -z "$otomi_version" ] && otomi_version=$(cat $PWD/package.json | jq -r .version)
   [ -z "$otomi_version" ] && otomi_version='main'
   echo $otomi_version
 }
 
 function customer_name() {
-  [ -f $otomi_settings ] && yq r $otomi_settings "customer.name" && return 0
+  [ -f $otomi_settings ] && yq 'customer.name' $otomi_settings && return 0
   [ -n "$CI" ] && return 0
   return 1
 }
@@ -203,7 +202,7 @@ function crypt() {
         [ -n "$VERBOSE" ] && echo "Found timestamp diff in seconds: $sec_diff"
       fi
       if [ ! -f $file.dec ] || [ $sec_diff -gt 1 ]; then
-        helm secrets enc $file >$out
+        helm secrets encrypt -i $file >$out
         ts=$(stat -c %Y $file)
         chek_ts=$(expr $ts + 1)
         touch -d @$chek_ts $file.dec
@@ -212,7 +211,7 @@ function crypt() {
         [ -n "$VERBOSE" ] && echo "Skipping encryption for $file as it is not changed."
       fi
     else
-      if helm secrets dec $file >$out; then
+      if helm secrets decrypt "$file" > "${file}.dec"; then
         # we correct timestamp of decrypted file to match source file,
         # in order to detect changes for conditional encryption
         [ -n "$VERBOSE" ] && echo "Setting timestamp of decrypted file to that of source file."
@@ -236,7 +235,7 @@ function hf_values() {
   hf -f helmfile.tpl/helmfile-dump.yaml build |
     grep -Ev $helmfile_output_hide |
     sed -e $replace_paths_pattern |
-    yq read -P - 'renderedvalues'
+    yq '.renderedvalues' -
 }
 
 function hf_template() {

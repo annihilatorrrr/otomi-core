@@ -2,20 +2,16 @@
 {{- $tc := $v.teamConfig }}
 {{- $coreAdminServices := list }}
 {{- range $s := $v.adminApps }}
-  {{- range $ing := $s | get "ingress" nil }}
-    {{- if $ing }}
-      {{- $svc := merge $ing (dict "isCore" true "name" $s.name "isShared" ($s | get "isShared" false) "ownHost" ($s | get "ownHost" false)) }}
-      {{- $coreAdminServices = append $coreAdminServices $svc }}
-    {{- end }}
+  {{- range $ing := $s | get "ingress" list }}
+    {{- $svc := merge $ing (dict "isCore" true "name" $s.name "isShared" ($s | get "isShared" false) "ownHost" ($s | get "ownHost" false)) }}
+    {{- $coreAdminServices = append $coreAdminServices $svc }}
   {{- end }}
 {{- end }}
 {{- $coreTeamServices := list }}
 {{- range $s := $v.teamApps }}
-  {{- range $ing := $s | get "ingress" nil }}
-    {{- if $ing }}
-      {{- $svc := merge $ing (dict "isCore" true "name" $s.name "isShared" false "ownHost" ($s | get "ownHost" false)) }}
-      {{- $coreTeamServices = append $coreTeamServices $svc }}
-    {{- end }}
+  {{- range $ing := $s | get "ingress" list }}
+    {{- $svc := merge $ing (dict "isCore" true "name" $s.name "isShared" false "ownHost" ($s | get "ownHost" false)) }}
+    {{- $coreTeamServices = append $coreTeamServices $svc }}
   {{- end }}
 {{- end }}
 {{- $domains := dict }}
@@ -23,17 +19,11 @@
   {{- $_ := set $tc "admin" dict }}
 {{- end }}
 {{- range $teamId, $team := $tc }}
-  {{- $baseDomain := printf "%s%s" (eq $teamId "admin" | ternary "" (printf "team-%s." $teamId)) $v.cluster.domainSuffix }}
+  {{- $baseDomain := $v.cluster.domainSuffix }}
   {{- $services := (eq $teamId "admin" | ternary (concat $coreAdminServices ($team | get "services" list)) (concat $coreTeamServices ($team | get "services" list))) }}
   {{- range $s := $services }}
-    {{- $domain := printf "apps.%s" $baseDomain }}
-    {{- if hasKey $s "domain" }}
-      {{- $domain = $s.domain }}
-    {{- else if $s | get "isShared" false }}
-      {{- $domain = printf "%s.%s" $s.name $v.cluster.domainSuffix }}
-    {{- else if $s | get "ownHost" false }}
-      {{- $domain = printf "%s.%s" $s.name $baseDomain }}
-    {{- end }}
+    {{- $host := eq $teamId "admin" | ternary $s.name (printf "%s-%s" $s.name $teamId ) -}}
+    {{- $domain := printf "%s.%s" $host $baseDomain }}
     {{- if not (hasKey $domains $domain) }}
       {{- $_ := set $domains $domain (dict "hasCert" (hasKey $s "hasCert")) }}
     {{- end }}
@@ -42,12 +32,9 @@
       {{- if ne ($s | get "certName" "") "" }}
         {{- $_ := set $domInfo "certName" $s.certName }}
       {{- end }}
-      {{- if ne ($s | get "certArn" "") "" }}
-        {{- $_ := set $domInfo "certArn" $s.certArn }}
-      {{- end }}
     {{- end }}
   {{- end }}
 {{- end }}
 {{- $authDomain := print "auth." $v.cluster.domainSuffix }}
-{{- $_ := set $domains $authDomain (dict "hasCert" false "certArn" "" "certName" "") }}
+{{- $_ := set $domains $authDomain (dict "hasCert" false "certName" "") }}
 {{ $domains | toYaml }}

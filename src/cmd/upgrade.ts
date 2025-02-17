@@ -1,14 +1,15 @@
 /* eslint-disable @typescript-eslint/no-misused-promises */
 /* eslint-disable no-await-in-loop */
 /* eslint-disable no-restricted-syntax */
+import { isEmpty } from 'lodash'
+import { prepareEnvironment } from 'src/common/cli'
+import { hfValues } from 'src/common/hf'
+import { getDeploymentState } from 'src/common/k8s'
+import { getFilename, loadYaml, rootDir, semverCompare } from 'src/common/utils'
+import { getCurrentVersion } from 'src/common/values'
+import { BasicArguments, setParsedArgs } from 'src/common/yargs'
 import { Argv } from 'yargs'
 import { $, cd } from 'zx'
-import { prepareEnvironment } from '../common/cli'
-import { hfValues } from '../common/hf'
-import { getDeploymentState, setDeploymentState } from '../common/k8s'
-import { getFilename, guccify, loadYaml, rootDir, semverCompare } from '../common/utils'
-import { getCurrentVersion } from '../common/values'
-import { BasicArguments, setParsedArgs } from '../common/yargs'
 
 const cmdName = getFilename(__filename)
 
@@ -36,21 +37,12 @@ interface Upgrade {
 export type Upgrades = Array<Upgrade>
 
 // select upgrades after semver version, and always select upgrade with version "dev" for dev purposes
-function filterUpgrades(version: string, upgrades: Upgrades): Upgrades {
-  return upgrades.filter((c) => c.version === 'dev' || semverCompare(version, c.version))
+export function filterUpgrades(version: string, upgrades: Upgrades): Upgrades {
+  return upgrades.filter((c) => c.version === 'dev' || semverCompare(version, c.version) === -1)
 }
 
-async function execute(d: typeof console, dryRun: boolean, operations: string[], values: Record<string, any>) {
-  for (const o of operations) {
-    const matches: string[] = []
-    const opStr = o.replace(/(\$\([^)]*\)|`[^`]*`)/g, (match, token) => {
-      matches.push(token)
-      return `T${matches.length - 1}X`
-    })
-    const op = (await guccify(opStr, values))
-      .replaceAll(/do\W?\n/g, 'do ')
-      .replaceAll('\n', ';')
-      .replaceAll(/T([0-9]+)X/g, (match, token) => matches[token])
+async function execute(d: typeof console, dryRun: boolean, operations: string[]) {
+  for (const op of operations) {
     d[dryRun ? 'log' : 'info'](`operation: ${op}`)
     if (dryRun) return
     const res = await $`${op}`
@@ -61,11 +53,18 @@ async function execute(d: typeof console, dryRun: boolean, operations: string[],
 
 /**
  * Checks if any operations need to be ran for releases and executes those.
+ * This function is also run as a helm chart hook
  */
 export const upgrade = async ({ dryRun = false, release, when }: Arguments): Promise<void> => {
   const d = console // wrapped stream created by terminal(... is not showing
-  const upgrades: Upgrades = loadYaml(`${rootDir}/upgrades.yaml`)?.operations
-  const prevVersion: string = (await getDeploymentState()).version || '0.1.0'
+  const upgrades: Upgrades = (await loadYaml(`${rootDir}/upgrades.yaml`))?.operations
+  const deploymentState = await getDeploymentState()
+  if (isEmpty(deploymentState)) {
+    d.info('Skipping the upgrade procedure as this is the very first installation')
+    return
+  }
+  const version = await getCurrentVersion()
+  const prevVersion: string = deploymentState.version ?? version
   const values = (await hfValues()) as Record<string, any>
   d.info(`Current version of otomi: ${prevVersion}`)
   const filteredUpgrades = filterUpgrades(prevVersion, upgrades)
@@ -79,21 +78,19 @@ export const upgrade = async ({ dryRun = false, release, when }: Arguments): Pro
         // before everything
         if (c[when]) {
           d.info(`Upgrade records detected for version ${c.version}`)
-          await execute(d, dryRun, c[when], values)
+          await execute(d, dryRun, c[when] as string[])
         }
       } else if (c.releases?.[release]) {
         // just in time before a release gets synced
         const r = c.releases[release]
         if (r[when]) {
           d.info(`Upgrade records detected for version ${c.version}, release: ${release}`)
-          await execute(d, dryRun, r[when], values)
+          await execute(d, dryRun, r[when] as string[])
         }
       }
     }
     $.quote = q
     // set latest version deployed in configmap
-    const version = await getCurrentVersion()
-    await setDeploymentState({ version })
   } else d.info('No upgrade operations detected, skipping')
 }
 

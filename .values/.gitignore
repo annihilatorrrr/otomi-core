@@ -10,3 +10,5 @@ core.yaml
 .secrets
 *.sample
 .env
+env/status.yaml
+env/bootstrap.yaml

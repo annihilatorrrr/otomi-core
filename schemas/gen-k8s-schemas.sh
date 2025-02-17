@@ -10,20 +10,27 @@ set -ex
 #   X.Y.Z-local - relative references, useful to avoid the network dependency
 
 declare -a K8S_VERSIONS=(
-  v1.23.5
-  v1.22.8
-  v1.21.7
-  v1.20.13
-  v1.19.16
+  v1.32.0
+  v1.31.1
+  v1.30.2
+  v1.29.4
+  v1.28.3
+  v1.27.4
+  v1.26.7
+  v1.25.8
+  v1.24.12
+  v1.23.17
+  v1.22.17
+  v1.21.13
 )
 
 pushd schemas
 
-# OPENAPI2JSONSCHEMABIN="docker run -i -v ${PWD}:/out/schemas ghcr.io/yannh/openapi2jsonschema:latest"
-OPENAPI2JSONSCHEMABIN="openapi2jsonschema"
+OPENAPI2JSONSCHEMABIN="docker run -i -v ${PWD}:/out/schemas ghcr.io/yannh/openapi2jsonschema:latest"
+# OPENAPI2JSONSCHEMABIN="openapi2jsonschema"
 
 if [ -n "${K8S_VERSION_PREFIX}" ]; then
-  export K8S_VERSIONS=$(git ls-remote --refs --tags https://github.com/kubernetes/kubernetes.git | cut -d/ -f3 | grep -e '^'${K8S_VERSION_PREFIX} | grep -e '^v1\.[0-9]\{2\}\.[0-9]\{1,2\}$')
+  export K8S_VERSIONS=$(git ls-remote --refs --tags https://github.com/kubernetes/kubernetes.git | cut -d/ -f3 | grep -e '^'"${K8S_VERSION_PREFIX}" | grep -e '^v1\.[0-9]\{2\}\.[0-9]\{1,2\}$')
 fi
 
 for K8S_VERSION in "${K8S_VERSIONS[@]}"; do
@@ -40,9 +47,17 @@ for K8S_VERSION in "${K8S_VERSIONS[@]}"; do
 
   if [ ! -f "${OUT_VERSION}-standalone.tar.gz" ]; then
     $OPENAPI2JSONSCHEMABIN -o "${OUT_VERSION}-standalone" --expanded --kubernetes --stand-alone "${SCHEMA}"
+    container_id=$(docker ps -a -l -q)
+    docker cp $container_id:/out/${OUT_VERSION}-standalone ${PWD}/${OUT_VERSION}-standalone-expanded
+
     $OPENAPI2JSONSCHEMABIN -o "${OUT_VERSION}-standalone" --kubernetes --stand-alone "${SCHEMA}"
-    tar -zcvf ${OUT_VERSION}-standalone.tar.gz ${OUT_VERSION}-standalone
-    rm -rf ${OUT_VERSION}-standalone
+    container_id=$(docker ps -a -l -q)
+    docker cp $container_id:/out/${OUT_VERSION}-standalone ${PWD}/${OUT_VERSION}-standalone
+
+    cp -r ${OUT_VERSION}-standalone-expanded/* ${OUT_VERSION}-standalone
+    tar -zcvf "${OUT_VERSION}"-standalone.tar.gz "${OUT_VERSION}"-standalone
+    rm -rf "${OUT_VERSION}"-standalone-expanded
+    rm -rf "${OUT_VERSION}"-standalone
   fi
 
   # if [ ! -f "${OUT_VERSION}-local.tar.gz" ]; then

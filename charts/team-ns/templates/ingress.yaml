@@ -1,32 +1,23 @@
 {{- $ns := .Release.Namespace }}
 {{- $v := .Values }}
-{{- $k := $v.apps.keycloak | default dict }}
 # split list of services into separate ingress types:
 # - core apps that need path forwarding (apps.*/appName stuff)
 # - public/private?
 # - auth/open?
 # - tlsPass?
 {{- range $type := list "public" "private" }}{{/* type "cluster" does not need ingress*/}}
-  {{- $apps := list }}
-  {{- $appsForward := list }}
   {{- $auth := list }}
   {{- $authForward := list }}
   {{- $open := list }}
   {{- $openForward := list }}
   {{- $tlsPass := list }}
   {{- range $s := $v.services }}
+    {{- if not $s.hasOwnIngress }}
     {{- $ingType := $s.type | default "public" }}
     {{- if and (eq $ingType $type) }}
-      {{- $isApps := and $s.isCore (not (or $s.ownHost $s.isShared)) }}
       {{- $hasAuth := $s.auth | default false }}
       {{- $isTlsPass := $s.tlsPass | default false }}
-      {{- if $isApps }}
-        {{- if $s.forwardPath }}
-          {{- $appsForward = append $appsForward $s }}
-        {{- else }}
-          {{- $apps = append $apps $s }}
-        {{- end }}
-      {{- else if $isTlsPass }}
+      {{- if $isTlsPass }}
         {{- $tlsPass = append $tlsPass $s }}
       {{- else if $hasAuth }}
         {{- if $s.forwardPath }}
@@ -42,46 +33,31 @@
         {{- end }}
       {{- end }}
     {{- end }}
+    {{- end }}
   {{- end }}
+
 
   {{- if gt (len $tlsPass) 0 }}
-{{ include "ingress" (dict "type" $type "dot" $ "provider" "nginx" "name" "tlspass" "hasForward" false "hasAuth" false "services" $tlsPass "tlsPass" true) }}
-  {{- end }}
-
-  {{- if gt (len $apps) 0 }}
-{{ include "ingress" (dict "type" $type "dot" $ "provider" "nginx" "name" "apps" "hasAuth" true "services" $apps "isApps" true) }}
-  {{- end }}
-
-  {{- if gt (len $appsForward) 0 }}
-{{ include "ingress" (dict "type" $type "dot" $ "provider" "nginx" "name" "apps-forward" "hasForward" true "hasAuth" true "services" $appsForward "isApps" true) }}
+{{ include "ingress" (dict "type" $type "dot" $ "name" "tlspass" "hasForward" false "hasAuth" false "services" $tlsPass "tlsPass" true) }}
   {{- end }}
 
   {{- if gt (len $auth) 0 }}
-{{ include "ingress" (dict "type" $type "dot" $ "provider" "nginx" "name" "auth" "hasForward" false "hasAuth" true "services" $auth) }}
+{{ include "ingress" (dict "type" $type "dot" $ "name" "auth" "hasForward" false "hasAuth" true "services" $auth) }}
   {{- end }}
 
   {{- if gt (len $authForward) 0 }}
-{{ include "ingress" (dict "type" $type "dot" $ "provider" "nginx" "name" "auth-forward" "hasForward" true "hasAuth" true "services" $authForward) }}
+{{ include "ingress" (dict "type" $type "dot" $ "name" "auth-forward" "hasForward" true "hasAuth" true "services" $authForward) }}
 
   {{- end }}
 
   {{- if gt (len $open) 0 }}
-{{ include "ingress" (dict "type" $type "dot" $ "provider" "nginx" "name" "open" "hasForward" false "hasAuth" false "services" $open) }}
+{{ include "ingress" (dict "type" $type "dot" $ "name" "open" "hasForward" false "hasAuth" false "services" $open) }}
 
   {{- end }}
 
   {{- if gt (len $openForward) 0 }}
-{{ include "ingress" (dict "type" $type "dot" $ "provider" "nginx" "name" "open-forward" "hasForward" true "hasAuth" false "services" $openForward) }}
+{{ include "ingress" (dict "type" $type "dot" $ "name" "open-forward" "hasForward" true "hasAuth" false "services" $openForward) }}
 
-  {{- end }}
-
-  {{- if $v.otomi.hasCloudLB }}
-  {{- $svcs := list }}
-  {{- range $s := $v.services }}{{ if eq $s.type $type }}{{ $svcs = append $svcs $s }}{{ end }}{{ end }}
-  {{- if gt (len $svcs) 0 }}
-{{ include "ingress" (dict "type" $type "dot" $ "provider" $v.cluster.provider "name" "external" "hasForward" false "hasAuth" false "services" $svcs) }}
-
-  {{- end }}
   {{- end }}
 
 {{- end }}

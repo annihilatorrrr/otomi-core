@@ -3,53 +3,43 @@
 {{- $o := $v.apps | get "otomi-api" }}
 {{- $g := $v.apps.gitea }}
 {{- $cm := $v.apps | get "cert-manager" }}
+{{- $d := $v.apps.drone }}
 {{- $sops := $v | get "kms.sops" dict }}
-{{- $hasGitea := $g.enabled }}
 {{- $giteaValuesUrl := printf "gitea.%s/otomi/values" $v.cluster.domainSuffix }}
+{{- $helmChartCatalog := printf "https://gitea.%s/otomi/charts.git" $v.cluster.domainSuffix }}
+{{- $defaultPlatformAdminEmail := printf "platform-admin@%s" $v.cluster.domainSuffix }}
 {{- $sopsEnv := tpl (readFile "../../helmfile.d/snippets/sops-env.gotmpl") $sops }}
 
 replicaCount: 1
 clusterDomainSuffix: {{ $v.cluster.domainSuffix }}
 
-resources:
-{{- with $o | get "resources.api" nil }}
-  {{- toYaml . | nindent 2 }}
-{{- else }}
-  limits:
-    cpu: 500m
-    memory: 512Mi
-  requests:
-    cpu: 100m
-    memory: 256Mi
-{{- end }}
+resources: {{- $o.resources.api | toYaml | nindent 2 }}
 
 {{- tpl (readFile "../../helmfile.d/snippets/job.gotmpl") (dict "item" "api" "v" $v "skipScript" true) }}
 
 secrets:
-  {{- if $hasGitea }}
   GIT_USER: otomi-admin
   GIT_EMAIL: not@us.ed
-  GIT_PASSWORD: {{ $g | get "admin.password" $v.otomi.adminPassword }}
-  {{- else }}
-  GIT_USER: {{ $o.git.user }}
-  GIT_EMAIL: {{ $o.git.email }}
-  GIT_PASSWORD: {{ $o.git.password }}
-  {{- end }}
+  GIT_PASSWORD: {{ $g.adminPassword }}
   {{- $sopsEnv | nindent 2 }}
   
 env:
-  # DEBUG: '*'
+  HELM_CHART_CATALOG: {{ $helmChartCatalog }}
+  DEFAULT_PLATFORM_ADMIN_EMAIL: {{ $defaultPlatformAdminEmail }}
+  DEBUG: 'otomi:*,-otomi:authz,-otomi:repo'
   VERBOSITY: '1'
   GIT_REPO_URL: {{ $o | get "git.repoUrl" $giteaValuesUrl }}
   GIT_BRANCH: {{ $o | get "git.branch" "main" }}
-  CORE_VERSION: {{ $v.otomi.version }}
+  VERSIONS: |
+    {{ $v.versions | toJson | nindent 4}}
   {{- if $v._derived.untrustedCA }}
   GIT_SSL_NO_VERIFY: true
   NODE_TLS_REJECT_UNAUTHORIZED: '0'
   CUSTOM_ROOT_CA: |
     {{- $v._derived.caCert | nindent 4 }}
   {{- end }}
-  IN_DOCKER: '1'
+  EDITOR_INACTIVITY_TIMEOUT: {{ $o.editorInactivityTimeout }}
+  DRONE_WEBHOOK_SECRET: {{ $d | get "sharedSecret" }}
 
 core:
   k8s: {{- toYaml $v.k8s | nindent 4 }}
@@ -59,17 +49,7 @@ core:
 
 tools:
   {{- tpl (readFile "../../helmfile.d/snippets/job.gotmpl") (dict "item" "core" "v" $v "skipScript" true) | nindent 2 }}
-  resources:
-  {{- with $o | get "resources.tools" nil }}
-    {{- toYaml . | nindent 4 }}
-  {{- else }}
-    limits:
-      cpu: 600m
-      memory: 512Mi
-    requests:
-      cpu: 100m
-      memory: 128Mi
-  {{- end }}
+  resources: {{- $o.resources.tools | toYaml | nindent 4 }}
   env:
     DEBUG: '*'
     VERBOSITY: '1'

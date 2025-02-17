@@ -148,6 +148,7 @@ rules:
 - apiGroups: ["route.openshift.io"]
   resources:
   - routes
+  - routes/custom-host
   verbs:
   - create
   - delete
@@ -191,6 +192,29 @@ rules:
   - patch
   - update
   - watch
+{{- if .Capabilities.APIVersions.Has "route.openshift.io/v1" }}
+# The permissions below are for OSSMC operator capabilities
+- apiGroups: ["console.openshift.io"]
+  resources:
+  - consoleplugins
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups: ["operator.openshift.io"]
+  resources:
+  - consoles
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+{{- end }}
 # The permissions below are for Kiali itself; operator needs these so it can escalate when creating Kiali's roles
 - apiGroups: [""]
   resources:
@@ -250,31 +274,10 @@ rules:
   - authentication.istio.io
   - rbac.istio.io
   - security.istio.io
+  - extensions.istio.io
+  - telemetry.istio.io
+  - gateway.networking.k8s.io
   resources: ["*"]
-  verbs:
-  - get
-  - list
-  - watch
-  {{- if eq .Values.onlyViewOnlyMode false }}
-  - create
-  - delete
-  - patch
-  {{- end }}
-- apiGroups: ["authentication.maistra.io"]
-  resources:
-  - servicemeshpolicies
-  verbs:
-  - get
-  - list
-  - watch
-  {{- if eq .Values.onlyViewOnlyMode false }}
-  - create
-  - delete
-  - patch
-  {{- end }}
-- apiGroups: ["rbac.maistra.io"]
-  resources:
-  - servicemeshrbacconfigs
   verbs:
   - get
   - list
@@ -309,4 +312,4 @@ rules:
   - tokenreviews
   verbs:
   - create
-...
+---

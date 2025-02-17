@@ -12,27 +12,30 @@ bases:
 {{- $a := $v.apps }}
 
 releases:
-  - name: argocd-operator-artifacts
+  - name: argocd-artifacts
     installed: {{ $a | get "argocd.enabled" }}
     namespace: argocd
     labels:
       pkg: argocd
+      app: core
     <<: *raw
   - name: istio-operator
     installed: true
-    namespace: default
+    namespace: istio-operator
     labels:
       pkg: istio
+      app: core
     <<: *default
-  - name: keycloak
+  - name: keycloak-artifacts
     installed: true
     namespace: keycloak
     labels:
       pkg: keycloak
-    <<: *default
-  - name: vault-operator-artifacts
-    installed: {{ $a | get "vault.enabled" }}
-    namespace: vault
-    labels:
-      pkg: vault
     <<: *raw
+  - name: keycloak-operator
+    installed: true
+    namespace: keycloak
+    labels:
+      pkg: keycloak-operator
+    <<: *default
+

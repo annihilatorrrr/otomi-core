@@ -41,15 +41,11 @@ otomi.io/team: {{ .Values.teamId }}
 
 {{- define "service.domain" -}}
 {{- $v := .dot.Values }}
-{{- $isApps := and .s.isCore (not (or .s.ownHost .s.isShared)) }}
-{{- if and $isApps (not .vs) }}
-{{- printf "apps.%s" $v.domain -}}
-{{- else -}}
 {{- $svc := (hasKey .s "hasPrefix" | ternary (printf "%s-%s" $v.teamId (.s.svc | default .s.name)) (.s.svc | default .s.name)) -}}
 {{- $shared := (and .s.isCore (eq $v.teamId "admin") (hasKey .s "isShared")) | default false -}}
-{{- $domain := (index .s "domain" | default (printf "%s.%s" .s.name ($shared | ternary $v.cluster.domainSuffix $v.domain))) -}}
+{{- $host := ($shared | ternary .s.name (printf "%s-%s" .s.name $v.teamId )) -}}
+{{- $domain := (index .s "domain" | default (printf "%s.%s" $host $v.domain)) -}}
 {{- print $domain -}}
-{{- end -}}
 {{- end -}}
 
 {{/* aggregate all the files and create a dict by dirname > list (filename content) */}}

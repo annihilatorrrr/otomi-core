@@ -1,0 +1,11 @@
+{{- $v := .Values }}
+{{- $t := $v.apps.tekton }}
+
+interceptors:
+  resources: {{- $t.resources.triggersInterceptors | toYaml | nindent 4 }}
+
+controller:
+  resources: {{- $t.resources.triggersController | toYaml | nindent 4 }}
+
+webhook:
+  resources: {{- $t.resources.triggersWebhook | toYaml | nindent 4 }}

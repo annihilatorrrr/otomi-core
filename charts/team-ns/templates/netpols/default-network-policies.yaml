@@ -1,0 +1,84 @@
+{{/* Below merge is a workaround for: https://github.com/helm/helm/issues/9266 */}}
+{{- $v := .Values | merge (dict) }}
+{{- if (not (dig "networkPolicy" "ingressPrivate" true $v)) }}
+---
+# If team network policies are disabled then we whitelist all traffic to prevent undesired blocking while deploying team workloads
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: default-ingress-allow-all
+  labels: {{- include "team-ns.chart-labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {}
+  ingress:
+  - from:
+    - namespaceSelector: {}
+{{- else if and (not (eq $v.teamId "admin")) (dig "networkPolicy" "ingressPrivate" true $v) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-ingress-deny
+  labels: {{- include "team-ns.chart-labels" $ | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+---
+# Allow traffic from platform services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-ingress-platform
+  labels: {{- include "team-ns.chart-labels" $ | nindent 4 }}
+spec:
+  # Match all Pods in this namespace
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              # FIXME: it seems that knative operator wipes out 'name' label, 
+              # we can still rely on automatic k8s labeling but it has some prerequsites: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/#automatic-labelling
+              # name: knative-serving
+              kubernetes.io/metadata.name: knative-serving
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: po-prometheus
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: tekton-pipelines
+---
+# Allow webhook traffic from gitea to event listeners
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-from-gitea
+  labels: {{- include "team-ns.chart-labels" $ | nindent 4 }}
+spec:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: gitea
+          podSelector:
+            matchLabels:
+              app: gitea
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: EventListener
+  policyTypes:
+    - Ingress
+{{- end }}

@@ -27,8 +27,6 @@ fullnameOverride: drone
 sharedSecret: {{ $d | get "sharedSecret" }}
 sourceControl: {{- $d.sourceControl | toYaml | nindent 2 }}
 server:
-  annotations:
-    policy.otomi.io/ignore: psp-allowed-users
   host: {{ $host }}
   protocol: https
   adminUser: {{ $d | get "adminUser" "otomi-admin" }}
@@ -59,12 +57,14 @@ server:
     {{- end }}
     {{- if eq $provider "github" }}
     DRONE_ADMISSION_ENDPOINT: http://drone-admit-members:80
-    DRONE_ADMISSION_SECRET: {{ $d | get "sharedSecret" (randAlpha 32) }}
+    DRONE_ADMISSION_SECRET: {{ $d | get "sharedSecret" }}
     {{- end }}
-
+    DRONE_WEBHOOK_ENDPOINT: http://otomi-api.otomi/drone
+    DRONE_WEBHOOK_SECRET: {{ $d | get "sharedSecret" }}
+  strategyType: Recreate
 agent:
   annotations:
-    policy.otomi.io/ignore: psp-allowed-users,psp-privileged,psp-host-filesystem,banned-image-tags
+    policy.otomi.io/ignore: banned-image-tags
     sidecar.istio.io/inject: "false"
   resources:
     {{- with $d | get "resources.agent" nil }}
@@ -105,12 +105,6 @@ agent:
 
 persistence:
   enabled: true
-  {{- if $v._derived.supportedCloud }}
-  storageClass: fast
-  {{- end }}
-  {{- if eq $v.cluster.provider "vultr" }}
-  size: 10Gi
-  {{- end }}
 metrics:
   prometheus:
     enabled: true

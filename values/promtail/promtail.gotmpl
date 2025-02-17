@@ -1,20 +1,10 @@
 {{- $v := .Values }}
-{{- $promtail := $v.apps.promtail }}
+{{- $p := $v.apps.promtail }}
 {{- $l := $v.apps | get "loki" }}
 
 nameOverride: promtail
 
-resources:
-  {{- if (hasKey $promtail "resources") }}
-    {{- $promtail.resources | toYaml | nindent 2 }}
-  {{- else }}
-  requests:
-    cpu: 100m
-    memory: 256Mi
-  limits:
-    cpu: 500m
-    memory: 384Mi
-  {{- end }}
+resources: {{- $p.resources | toYaml | nindent 4 }}
 
 serviceMonitor:
   enabled: true
@@ -38,18 +28,15 @@ serviceMonitor:
 
 podAnnotations:
   sidecar.istio.io/inject: "false"
-  # init container requires "privileged: true" thus we cannot remove "psp-allowed-users" policy Annotation
-  policy.otomi.io/ignore: psp-allowed-users,psp-privileged,psp-host-filesystem
 
 config:
   clients:
-    - url: http://loki.monitoring:3100/loki/api/v1/push
+    - url: http://loki-gateway.monitoring/loki/api/v1/push
       tenant_id: admins
 
   snippets:
     pipelineStages:
       - cri: {}
-      {{- if $v.otomi.isMultitenant }}
       - json:
           expressions:
             namespace:
@@ -64,7 +51,6 @@ config:
       {{- end }}
       - output: 
           source: message
-      {{- end }}
 
 priorityClassName: otomi-critical
 

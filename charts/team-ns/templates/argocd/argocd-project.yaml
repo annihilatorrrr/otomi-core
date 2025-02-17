@@ -1,6 +1,6 @@
 {{- $v := .Values }}
 {{- $a := $v.apps.argocd }}
-{{- if and (not (eq $v.teamId "admin")) $a.enabled }}
+{{- if $a.enabled }}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -13,15 +13,23 @@ spec:
   description: ArgoCD project for team {{ $v.teamId }}
   # Allow manifests to deploy from any Git repos
   sourceRepos:
-  - https://gitea.{{ $v.cluster.domainSuffix }}/otomi/team-{{ $v.teamId }}-argocd.git
+  - {{ $v.gitOps.teamRepoUrl }}
+  - {{ $v.gitOps.valuesRepoUrl }}
+  {{- range $v.workloads }}
+  - {{ .url }}
+  {{- end }}
   # Only permit applications to deploy to the guestbook namespace in the same cluster
   destinations:
   - namespace: team-{{ $v.teamId }}
     server: https://kubernetes.default.svc
   # Deny all cluster-scoped resources from being created
+  {{- if eq $v.teamId "admin" }}
+  clusterResourceWhitelist: 
+  - group: '*'
+    kind: '*'
+  {{- else }}
   clusterResourceWhitelist: []
-  # - group: ''
-  #   kind: Namespace
+  {{- end }}
   # Allow all namespaced-scoped resources to be created, except for ResourceQuota, LimitRange, NetworkPolicy
   namespaceResourceBlacklist:
   - group: ''
@@ -43,37 +51,41 @@ spec:
   # - group: 'apps'
   #   kind: StatefulSet
   roles:
-{{- if $v.otomi.isMultitenant }}
-  # we create a scoped team-admin role since we are only allowed access to team-* projects as team-admin in multitenant setup
-  - name: team-admin
+{{- if $v.isMultitenant }}
+  # we create a scoped platform-admin role since we are only allowed access to team-* projects as platform-admin in multitenant setup
+  - name: platform-admin
     description: Team member privileges to team-{{ $v.teamId }}
     policies:
-    - p, proj:team-{{ $v.teamId }}:team-admin, *, *, team-{{ $v.teamId }}/*, allow
+    - p, proj:team-{{ $v.teamId }}:platform-admin, *, *, team-{{ $v.teamId }}/*, allow
     groups:
-    - team-admin
+    - platform-admin
+    {{- if not (eq $v.teamId "admin") }}
     - team-{{ $v.teamId }}
+    {{- end }}
 {{- end }}
+{{- if not (eq $v.teamId "admin") }}
   - name: team-member
     description: Team member privileges to team-{{ $v.teamId }}
+{{- if or (has "argocd" $v.selfService.apps) $v.isMultitenant }}
     policies:
-{{- if has "argocd" $v.selfService.apps }}
+  {{- if has "argocd" $v.selfService.apps }}
     - p, proj:team-{{ $v.teamId }}:team-member, *, *, team-{{ $v.teamId }}/*, allow
-{{- else }}
-  {{- if $v.otomi.isMultitenant }}
-    - p, proj:team-{{ $v.teamId }}:team-member, *, get, team-{{ $v.teamId }}/*, allow
   {{- else }}
+    {{- if $v.isMultitenant }}
+    - p, proj:team-{{ $v.teamId }}:team-member, *, get, team-{{ $v.teamId }}/*, allow
+    {{- else }}
     # we already have read-only rights globally when not in multitenancy
+    {{- end }}
   {{- end }}
 {{- end }}
     groups:
     - team-{{ $v.teamId }}
+{{- end }}
   # A role which provides read-only access to all applications in the project
   - name: read-only
     description: Read-only privileges to team-{{ $v.teamId }}
     policies:
     - p, proj:team-{{ $v.teamId }}:read-only, applications, get, team-{{ $v.teamId }}/*, allow
-{{- if not $v.otomi.isMultitenant }}
-{{- end }}
     groups:
     - team-viewer
   - name: ci-role

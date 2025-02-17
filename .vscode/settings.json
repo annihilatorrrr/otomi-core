@@ -9,7 +9,7 @@
     "editor.defaultFormatter": "foxundermoon.shell-format"
   },
   "[javascript]": {
-    "editor.defaultFormatter": "dbaeumer.vscode-eslint"
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[typescript]": {
     "editor.defaultFormatter": "dbaeumer.vscode-eslint"
@@ -17,9 +17,9 @@
   "cSpell.diagnosticLevel": "Hint",
   "cSpell.enabled": true,
   "editor.codeActionsOnSave": {
-    "source.addMissingImports": true,
-    "source.fixAll": true,
-    "source.organizeImports": true
+    "source.addMissingImports": "explicit",
+    "source.fixAll": "explicit",
+    "source.organizeImports": "explicit"
   },
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.formatOnSave": true,
@@ -50,7 +50,13 @@
   "sops.enabled": false,
   "todohighlight.include": ["**/*.ts", "**/*.tsx", "**/*.html", "**/*.css", "**/*.scss", "**/*.gotmpl", "**/*.yaml"],
   "yaml.schemas": {
-    ".vscode/values-schema.yaml": "**/env/**/*.yaml",
+    "./values-schema.yaml": "**/env/**/*.yaml",
     "https://json-schema.org/draft-07/schema": "values-schema.yaml"
+  },
+  "[properties]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format"
+  },
+  "[dockerfile]": {
+    "editor.defaultFormatter": "ms-azuretools.vscode-docker"
   }
 }

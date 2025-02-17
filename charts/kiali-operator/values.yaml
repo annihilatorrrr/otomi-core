@@ -2,8 +2,8 @@ nameOverride: ""
 fullnameOverride: ""
 
 image: # see: https://quay.io/repository/kiali/kiali-operator?tab=tags
-  repo: quay.io/kiali/kiali-operator # quay.io/kiali/kiali-operator
-  tag: v1.47.0 # version string like v1.39.0 or a digest hash
+  repo: ${HELM_IMAGE_REPO} # quay.io/kiali/kiali-operator
+  tag: ${HELM_IMAGE_TAG} # version string like v1.39.0 or a digest hash
   digest: "" # use "sha256" if tag is a sha256 hash (do NOT prefix this value with a "@")
   pullPolicy: Always
   pullSecrets: []
@@ -11,6 +11,7 @@ image: # see: https://quay.io/repository/kiali/kiali-operator?tab=tags
 # Deployment options for the operator pod.
 nodeSelector: {}
 podAnnotations: {}
+podLabels: {}
 env: []
 tolerations: []
 resources:
@@ -20,6 +21,7 @@ resources:
 affinity: {}
 replicaCount: 1
 priorityClassName: ""
+securityContext: {}
 
 # metrics.enabled: set to true if you want Prometheus to collect metrics from the operator
 metrics:
@@ -38,6 +40,7 @@ watchNamespace: ""
 
 # Set to true if you want the operator to be able to create cluster roles. This is necessary
 # if you want to support Kiali CRs with spec.deployment.accessible_namespaces of '**'.
+# Setting this to "true" requires allowAllAccessibleNamespaces to be "true" also.
 # Note that this will be overriden to "true" if cr.create is true and cr.spec.deployment.accessible_namespaces is ['**'].
 clusterRoleCreator: true
 
@@ -67,6 +70,43 @@ allowAdHocKialiNamespace: true
 # You may want to disable this if you do not want users to install their own Kiali images.
 allowAdHocKialiImage: false
 
+# allowAdHocOSSMConsoleImage tells the operator to allow a user to be able to install a custom OSSMC image as opposed
+# to the image the operator will install by default. In other words, it will allow the
+# OSSMConsole CR spec.deployment.imageName and spec.deployment.imageVersion to be configured by the user.
+# You may want to disable this if you do not want users to install their own OSSMC images.
+# This is only applicable when running on OpenShift.
+allowAdHocOSSMConsoleImage: false
+
+# allowSecurityContextOverride tells the operator to allow a user to be able to fully override the Kiali
+# container securityContext. If this is false, certain securityContext settings must exist on the Kiali
+# container and any attempt to override them will be ignored.
+allowSecurityContextOverride: false
+
+# allowAllAccessibleNamespaces tells the operator to allow a user to be able to configure Kiali
+# to access all namespaces in the cluster via spec.deployment.accessible_namespaces=['**'].
+# If this is false, the user must specify an explicit list of namespaces in the Kiali CR.
+# Setting this to "true" requires clusterRoleCreator to be "true" also.
+# Note that this will be overriden to "true" if cr.create is true and cr.spec.deployment.accessible_namespaces is ['**'].
+allowAllAccessibleNamespaces: true
+
+# accessibleNamespacesLabel restricts the namespaces that a user can add to the Kiali CR spec.deployment.accessible_namespaces.
+# This value is either an empty string (which disables this feature) or a label name with an optional label value
+# (e.g. "mylabel" or "mylabel=myvalue"). Only namespaces that have that label will be permitted in
+# spec.deployment.accessible_namespaces. Any namespace not labeled properly but specified in accessible_namespaces will cause
+# the operator to abort the Kiali installation.
+# If just a label name (but no label value) is specified, the label value the operator will look for is the value of
+# the Kiali CR's spec.istio_namespace. In other words, the operator will look for the named label whose value must be the name
+# of the Istio control plane namespace (which is typically, but not necessarily, "istio-system").
+accessibleNamespacesLabel: ""
+
+# watchesFile: If specified, this determines what watches file will be used to configure the operator. There are four different
+# files that can be selected: (a) `watches-os.yaml`, (b) `watches-os-ns.yaml`, (c) `watches-k8s.yaml` or (d) `watches-k8s-ns.yaml`.
+# The first two are for OpenShift only, the last two are for non-OpenShift Kubernetes clusters. The two with "-ns" in their name
+# enable the operator to automatically update the Kiali Server with access to new namespaces as those namespaces are created in
+# the cluster. This namespace watching feature provides some advanced capabilities but is never required. It is also not
+# the default behavior and is not necessary if your Kiali CRs will have `spec.deployment.cluster_wide_access` set to `true`.
+watchesFile: ""
+
 # For what a Kiali CR spec can look like, see:
 # https://github.com/kiali/kiali-operator/blob/master/deploy/kiali/kiali_cr.yaml
 cr:
@@ -76,6 +116,9 @@ cr:
   # and the operator is watching all namespaces (--set watchNamespace="")
   # then this is the namespace where the CR will be created (the default will be the operator namespace).
   namespace: ""
+
+  # Annotations to place in the Kiali CR metadata.
+  annotations: {}
 
   spec:
     deployment:

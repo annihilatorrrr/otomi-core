@@ -1,9 +1,6 @@
 # Minimal values file with defaults
 cluster:
-  k8sVersion: 'K8S_VERSION_PLACEHOLDER'
-  name: 'dev'
-  provider: digitalocean
+  name: CLUSTER_NAME_PLACEHOLDER
   k8sContext: CONTEXT_PLACEHOLDER
 otomi:
   version: 'OTOMI_VERSION_PLACEHOLDER'
-  adminPassword: welcomeotomi

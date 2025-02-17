@@ -1,9 +1,12 @@
 {{- $v := .Values }}
 {{- $i := $v.apps | get "istio" }}
 hub: istio
-tag: {{ $i | get "image.tag" "1.13.1" }}
-podAnnotations:
-  policy.otomi.io/ignore: psp-allowed-users
+tag: 1.22.5
+
+operatorNamespace: istio-operator
+
+operator:
+  resources: {{- $i.resources.operator | toYaml | nindent 6 }}
 
 {{- with .Values.otomi | get "globalPullSecret" nil }}
 imagePullSecrets:
